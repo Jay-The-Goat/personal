@@ -12,7 +12,7 @@ local DATABASE = {
     
     -- ADD AUTHORIZED USERS HERE: Put the exact Roblox usernames inside quotes
     AllowedUsernames = {
-        "Friend1",
+        "Blixxrrr",
         "TrustedDeveloper",
         "TesterAccount"
     },
