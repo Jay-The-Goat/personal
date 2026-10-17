@@ -1,188 +1,387 @@
-import customtkinter as ctk
+-- Smart Hub Tool Grabber V13 - Infinite Quantum Velocity Edition
+-- Fully Unbound Execution: Zero Task Scheduling, Direct Microsecond Memory Lookups
 
-# Configure global dark theme properties to mirror your dashboard images
-ctk.set_appearance_mode("Dark")
-ctk.set_default_color_theme("blue")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local Tycoons = workspace:WaitForChild("Tycoons", 10)
 
-class MidnightHubUIDesigner(ctk.CTk):
-    def __init__(self):
-        super().__init__()
+if not Tycoons then
+	warn("[Smart Hub Tool Grabber] workspace.Tycoons nao encontrado.")
+	return
+end
 
-        # Desktop Window Configurations
-        self.title("Midnight Hub - Developer UI Control Center")
-        self.geometry("960x600")
-        self.resizable(False, False)
-        self.configure(fg_color="#0f1115") # Match your first image's dark backdrop
+---------------------------------------------------
+-- CONFIG - OVERDRIVE PERFORMANCE CONFIG
+---------------------------------------------------
 
-        # Active view container tracker
-        self.current_viewport = None
+local TOUCH_BURST = 150          -- Drastically increased to force total remote queue saturation
+local SPAWN_TOUCH_BURST = 300    -- Massive burst to immediately pull all weapons on frame 1
+local PAD_RANGE = 50000          -- Map-wide reach
 
-        # Assemble fixed header panel structure
-        self.initialize_header_navigation()
-        
-        # Load the Overview Page as the initial view
-        self.switch_to_overview_page()
+local QUICK_RECHECK_DELAY = 0    -- ABSOLUTE ZERO DELAY
+local SPAWN_FORCE_TIME = 2.0
+local SPAWN_FORCE_ALL_TIME = 1.0
+local INSTANT_RESPAWN_WINDOW = 3.0
 
-    def initialize_header_navigation(self):
-        """Builds the main user header block card containing tabs and versioning text."""
-        # Top Header Background Card
-        self.header_card = ctk.CTkFrame(self, fg_color="#181a21", corner_radius=14, border_width=1, border_color="#262930")
-        self.header_card.place(x=20, y=20, width=920, height=100)
+local ALLOWED_BASE_ORDER = {
+	"Stone", "Magic", "Storm", "Robotic", "Mecha", "Shadow",
+	"Hyper", "Thunder", "Void", "Frozen", "Magma", "Nuclear", "Toxic", "Kong",
+}
 
-        # Avatar Frame Layout Box
-        self.avatar_frame = ctk.CTkFrame(self.header_card, fg_color="#22252e", corner_radius=10, width=64, height=64)
-        self.avatar_frame.place(x=18, y=18)
-        self.avatar_label = ctk.CTkLabel(self.avatar_frame, text="👤", font=ctk.CTkFont(size=28))
-        self.avatar_label.place(relx=0.5, rely=0.5, anchor="center")
+-- Extreme Speed Pre-compilation: Zero string allocation at runtime
+local FAST_BASE_LOOKUP = {}
+for i = 1, #ALLOWED_BASE_ORDER do
+	local v = ALLOWED_BASE_ORDER[i]
+	FAST_BASE_LOOKUP[v:lower()] = v
+end
 
-        # Configuration Status Strings
-        self.user_heading = ctk.CTkLabel(
-            self.header_card, 
-            text="Good evening, CrusherEagle1", 
-            font=ctk.CTkFont(family="Segoe UI", size=18, weight="bold"),
-            text_color="#ffffff"
-        )
-        self.user_heading.place(x=100, y=24)
+local TOOL_RULES = {
+	{ Pattern = "energy sword", Base = "Stone" },
+	{ Pattern = "staff", Base = "Magic" },
+	{ Pattern = "axe", Base = "Storm" },
+	{ Pattern = "fists", Base = "Robotic", ForceBase = true },
+	{ Pattern = "frozen claws", Base = "Frozen" },
+	{ Pattern = "nuclear claws", Base = "Nuclear" },
+	{ Pattern = "hyper claws", Base = "Hyper" },
+	{ Pattern = "thunder claws", Base = "Thunder" },
+	{ Pattern = "toxic claws", Base = "Toxic" },
+	{ Pattern = "shadow claws", Base = "Shadow" },
+	{ Pattern = "void claws", Base = "Void" },
+	{ Pattern = "magma claws", Base = "Magma" },
+	{ Pattern = "punch", Base = "Kong" },
+	{ Pattern = "blade arms", Base = "Mecha" },
+}
 
-        self.sub_heading = ctk.CTkLabel(
-            self.header_card, 
-            text="You are using Pre Release [v 0.2.0]", 
-            font=ctk.CTkFont(family="Segoe UI", size=13, weight="medium"),
-            text_color="#8a8f9d"
-        )
-        self.sub_heading.place(x=100, y=52)
+local FORCED_BASE_TOUCHES = { Robotic = 4 }
 
-        # Navigation Controls (Top Right Tabs Array)
-        self.btn_nav_overview = ctk.CTkButton(
-            self.header_card, text="Overview", width=100, height=32, corner_radius=8,
-            fg_color="#3b82f6", hover_color="#2563eb", text_color="#ffffff",
-            font=ctk.CTkFont(size=12, weight="bold"), command=self.switch_to_overview_page
-        )
-        self.btn_nav_overview.place(x=690, y=34)
+---------------------------------------------------
+-- CLEANUP SYSTEM
+---------------------------------------------------
 
-        self.btn_nav_mods = ctk.CTkButton(
-            self.header_card, text="Modifications", width=100, height=32, corner_radius=8,
-            fg_color="#22252e", hover_color="#2d323e", text_color="#ffffff",
-            font=ctk.CTkFont(size=12, weight="bold"), command=self.switch_to_modifications_page
-        )
-        self.btn_nav_mods.place(x=802, y=34)
+if _G.__SmartHubToolGrabberCleanup then
+	pcall(_G.__SmartHubToolGrabberCleanup)
+end
 
-    def wipe_viewport(self):
-        """Clears old viewport containers before swapping script pages."""
-        if self.current_viewport:
-            self.current_viewport.destroy()
-        self.current_viewport = ctk.CTkFrame(self, fg_color="transparent", width=920, height=440)
-        self.current_viewport.place(x=20, y=140)
+local alive = true
+local connections = {}
+local characterConnections = {}
 
-    # =========================================================================
-    # TAB 1: OVERVIEW PAGE (Replicates Screenshot 1 Layout Panels)
-    # =========================================================================
-    def switch_to_overview_page(self):
-        self.wipe_viewport()
-        self.btn_nav_overview.configure(fg_color="#3b82f6")
-        self.btn_nav_mods.configure(fg_color="#22252e")
+local function disconnectList(list)
+	for i = 1, #list do
+		local conn = list[i]
+		if conn and conn.Connected then
+			conn:Disconnect()
+		end
+	end
+	table.clear(list)
+end
 
-        # ----------------- LEFT SIDE CONTEXT BLOCKS -----------------
-        # Main Server Info Frame Container
-        server_box = ctk.CTkFrame(self.current_viewport, fg_color="#14161d", corner_radius=14, border_width=1, border_color="#20232b")
-        server_box.place(x=0, y=0, width=480, height=300)
+local function track(conn)
+	table.insert(connections, conn)
+	return conn
+end
 
-        ctk.CTkLabel(server_box, text="Server", font=ctk.CTkFont(size=16, weight="bold"), text_color="#ffffff").place(x=20, y=15)
-        ctk.CTkLabel(server_box, text="Information on the session you're currently in", font=ctk.CTkFont(size=11), text_color="#64748b").place(x=20, y=38)
+local function trackCharacter(conn)
+	table.insert(characterConnections, conn)
+	return conn
+end
 
-        # Micro Server Metric Tiles
-        self.create_data_tile(server_box, "Players", "7 playing", 20, 70, 210, 60)
-        self.create_data_tile(server_box, "Maximum Players", "10 players can join", 250, 70, 210, 60)
-        self.create_data_tile(server_box, "Latency", "70ms", 20, 145, 140, 60)
-        self.create_data_tile(server_box, "Server Region", "DE", 175, 145, 285, 60)
-        self.create_data_tile(server_box, "In server for", "00:03:13", 20, 220, 180, 60, bg="#112926", txt_clr="#10b981")
-        self.create_data_tile(server_box, "Diagnostics", "Uptime monitor safe.", 215, 220, 245, 60)
+local function cleanup()
+	alive = false
+	disconnectList(connections)
+	disconnectList(characterConnections)
+	if _G.SmartHubToolGrabber then
+		_G.SmartHubToolGrabber = nil
+	end
+end
 
-        # Discord Card Panel
-        discord_box = ctk.CTkFrame(self.current_viewport, fg_color="#181a21", corner_radius=14, border_width=1, border_color="#5865f2")
-        discord_box.place(x=0, y=320, width=480, height=100)
-        ctk.CTkLabel(discord_box, text="Discord", font=ctk.CTkFont(size=22, weight="bold"), text_color="#ffffff").place(x=25, y=20)
-        ctk.CTkLabel(discord_box, text="Tap to join the Discord Server", font=ctk.CTkFont(size=14), text_color="#8a8f9d").place(x=25, y=50)
+_G.__SmartHubToolGrabberCleanup = cleanup
 
-        # ----------------- RIGHT SIDE CONTEXT BLOCKS -----------------
-        # Top-Right Volcano Executor Info Panel
-        volcano_box = ctk.CTkFrame(self.current_viewport, fg_color="#1c1616", corner_radius=14, border_width=1, border_color="#ef4444")
-        volcano_box.place(x=500, y=0, width=420, height=110)
-        ctk.CTkLabel(volcano_box, text="Volcano User", font=ctk.CTkFont(size=18, weight="bold"), text_color="#ef4444").place(x=25, y=20)
-        ctk.CTkLabel(volcano_box, text="Good Executor. I think u can use all\nScripts here.", 
-                     font=ctk.CTkFont(size=13, weight="medium"), text_color="#22c55e", justify="left").place(x=25, y=50)
+---------------------------------------------------
+-- STATE ENVIRONMENT
+---------------------------------------------------
 
-        # Bottom-Right Friends Matrix Container Panel
-        friends_box = ctk.CTkFrame(self.current_viewport, fg_color="#14161d", corner_radius=14, border_width=1, border_color="#20232b")
-        friends_box.place(x=500, y=130, width=420, height=290)
-        ctk.CTkLabel(friends_box, text="Friends", font=ctk.CTkFont(size=16, weight="bold"), text_color="#ffffff").place(x=25, y=20)
-        ctk.CTkLabel(friends_box, text="Find out what your friends are currently doing", font=ctk.CTkFont(size=11), text_color="#64748b").place(x=25, y=43)
+local padsByBase = {}
+local registeredPads = {}
+local currentCharacter = nil
+local currentRoot = nil
+local warnedMissingTouch = false
 
-        # Sub-Friend Counters (Styled to match screenshot 1)
-        self.create_data_tile(friends_box, "In Server", "0 friends", 25, 80, 175, 75, bg="#1c1c16")
-        self.create_data_tile(friends_box, "Offline", "0 friends", 220, 80, 175, 75)
-        self.create_data_tile(friends_box, "Online", "0 friends", 25, 175, 175, 75)
-        self.create_data_tile(friends_box, "All", "0 friends", 220, 175, 175, 75)
+local acquireRunning = false
+local scheduleSerial = 0
+local lifeSerial = 0
+local forceAllUntil = 0
+local baseForceUntil = {}
+local baseTouchCounts = {}
 
-    def create_data_tile(self, parent, title, status, x, y, w, h, bg="#1e212a", txt_clr="#a3a3a3"):
-        """Compiles clean rounded metric boxes mimicking card items inside screenshot 1."""
-        tile = ctk.CTkFrame(parent, fg_color=bg, corner_radius=10, border_width=1, border_color="#262a35")
-        tile.place(x=x, y=y, width=w, height=h)
-        ctk.CTkLabel(tile, text=title, font=ctk.CTkFont(size=11, weight="bold"), text_color="#ffffff").place(x=15, y=10)
-        ctk.CTkLabel(tile, text=status, font=ctk.CTkFont(size=12), text_color=txt_clr).place(x=15, y=28)
+for i = 1, #ALLOWED_BASE_ORDER do
+	padsByBase[ALLOWED_BASE_ORDER[i]] = {}
+end
 
-    # =========================================================================
-    # TAB 2: MODIFICATIONS PAGE (Replicates Screenshot 2 styled like Page 1)
-    # =========================================================================
-    def switch_to_modifications_page(self):
-        self.wipe_viewport()
-        self.btn_nav_overview.configure(fg_color="#22252e")
-        self.btn_nav_mods.configure(fg_color="#3b82f6")
+---------------------------------------------------
+-- MAX SPEED DISCOVERY ENGINE
+---------------------------------------------------
 
-        # ----------------- LEFT SIDE: ADJUSTMENT SLIDERS -----------------
-        sliders_panel = ctk.CTkFrame(self.current_viewport, fg_color="#14161d", corner_radius=14, border_width=1, border_color="#20232b")
-        sliders_panel.place(x=0, y=0, width=440, height=420)
-        
-        ctk.CTkLabel(sliders_panel, text="Character Settings", font=ctk.CTkFont(size=16, weight="bold"), text_color="#ffffff").place(x=25, y=20)
+local function normalizeName(value)
+	return tostring(value or ""):lower():gsub("[^%w]", "")
+end
 
-        # Walkspeed Slider Module Card
-        ws_card = ctk.CTkFrame(sliders_panel, fg_color="#1e212a", corner_radius=10, border_width=1, border_color="#262a35")
-        ws_card.place(x=20, y=70, width=400, height=85)
-        ctk.CTkLabel(ws_card, text="Walkspeed", font=ctk.CTkFont(size=13, weight="bold"), text_color="#ffffff").place(x=20, y=15)
-        self.ws_val = ctk.CTkLabel(ws_card, text="16", font=ctk.CTkFont(size=13), text_color="#3b82f6")
-        self.ws_val.place(x=360, y=15)
-        self.ws_slider = ctk.CTkSlider(ws_card, from_=16, to=250, width=360, command=lambda v: self.ws_val.configure(text=str(int(v))))
-        self.ws_slider.set(16)
-        self.ws_slider.place(x=20, y=48)
+local function allowedBaseFromName(name)
+	local normalized = normalizeName(name)
+	local originalName = FAST_BASE_LOOKUP[normalized]
+	if originalName then return originalName end
+	
+	for baseLower, origName in pairs(FAST_BASE_LOOKUP) do
+		if normalized:find(baseLower, 1, true) then
+			return origName
+		end
+	end
+	return nil
+end
 
-        # Jumppower Slider Module Card
-        jp_card = ctk.CTkFrame(sliders_panel, fg_color="#1e212a", corner_radius=10, border_width=1, border_color="#262a35")
-        jp_card.place(x=20, y=175, width=400, height=85)
-        ctk.CTkLabel(jp_card, text="Jumppower", font=ctk.CTkFont(size=13, weight="bold"), text_color="#ffffff").place(x=20, y=15)
-        self.jp_val = ctk.CTkLabel(jp_card, text="50", font=ctk.CTkFont(size=13), text_color="#3b82f6")
-        self.jp_val.place(x=360, y=15)
-        self.jp_slider = ctk.CTkSlider(jp_card, from_=50, to=500, width=360, command=lambda v: self.jp_val.configure(text=str(int(v))))
-        self.jp_slider.set(50)
-        self.jp_slider.place(x=20, y=48)
+local function findGearGiver1Ancestor(instance)
+	local node = instance
+	while node and node ~= Tycoons do
+		if node.Name == "GearGiver1" then
+			return node
+		end
+		node = node.Parent
+	end
+	return nil
+end
 
-        # ----------------- RIGHT SIDE: AUTOMATION TOGGLES -----------------
-toggles_panel = ctk.CTkFrame(self.current_viewport, fg_color="#14161d", corner_radius=14, border_width=1, border_color="#20232b")
-toggles_panel.place(x=460, y=0, width=460, height=420)
-ctk.CTkLabel(toggles_panel, text="Automation Toggles", font=ctk.CTkFont(size=16, weight="bold"), text_color="#ffffff").place(x=25, y=20)
-# Infinite Jump Row Card
-self.create_toggle_row(toggles_panel, "Infinite Jump", "Allows you jump in the air", 20, 70)
-# Fly Gui Row Card (Inspired by fly GUI V3 description)
-self.create_toggle_row(toggles_panel, "Fly Gui", "Custom-made fly GUI to match the theme of Midnight Hub", 20, 160)
-# Noclip Row Card
-self.create_toggle_row(toggles_panel, "Noclip", "Allows your character to pass through game assets and walls", 20, 250)
-def create_toggle_row(self, parent, name, desc, x, y):
-"""Assembles a clean toggle list item styled identically to the first dashboard panels."""
-row_frame = ctk.CTkFrame(parent, fg_color="#1e212a", corner_radius=10, border_width=1, border_color="#262a35")
-row_frame.place(x=x, y=y, width=420, height=75)
-ctk.CTkLabel(row_frame, text=name, font=ctk.CTkFont(size=13, weight="bold"), text_color="#ffffff").place(x=20, y=12)
-ctk.CTkLabel(row_frame, text=desc, font=ctk.CTkFont(size=11), text_color="#64748b").place(x=20, y=36)
-toggle_switch = ctk.CTkSwitch(row_frame, text="", width=45, height=24, progress_color="#3b82f6")
-toggle_switch.place(x=350, y=14)
-if name == "main":
-app = MidnightHubUIDesigner()
-app.mainloop()
+local function findAllowedBaseAncestor(instance)
+	local node = instance
+	while node and node ~= Tycoons do
+		local baseName = allowedBaseFromName(node.Name)
+		if baseName then
+			return baseName, node
+		end
+		node = node.Parent
+	end
+	return nil, nil
+end
+
+local function registerPad(part)
+	if not alive or not part:IsA("BasePart") then return end
+	if not part:FindFirstChildOfClass("TouchTransmitter") then return end
+
+	local giver = findGearGiver1Ancestor(part)
+	if not giver then return end
+
+	local baseName = findAllowedBaseAncestor(giver.Parent)
+	if not baseName then return end
+
+	if registeredPads[part] == baseName then return end
+
+	local oldBase = registeredPads[part]
+	if oldBase then
+		local oldPads = padsByBase[oldBase]
+		if oldPads then
+			for i = #oldPads, 1, -1 do
+				if oldPads[i] == part then
+					table.remove(oldPads, i)
+				end
+			end
+		end
+	end
+
+	registeredPads[part] = baseName
+	table.insert(padsByBase[baseName], part)
+end
+
+local function scanTycoons()
+	local descendants = Tycoons:GetDescendants()
+	for i = 1, #descendants do
+		registerPad(descendants[i])
+	end
+end
+scanTycoons()
+
+track(Tycoons.DescendantAdded:Connect(function(obj)
+	task.defer(registerPad, obj)
+end))
+
+---------------------------------------------------
+-- HIGH-SPEED QUANTUM INVENTORY TRACKING
+---------------------------------------------------
+
+local function hasTool(pattern)
+	-- Immediate local cache references
+	local backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
+	if backpack then
+		local children = backpack:GetChildren()
+		for i = 1, #children do
+			if string.find(string.lower(children[i].Name), pattern, 1, true) then
+				return true
+			end
+		end
+	end
+	local character = currentCharacter
+	if character then
+		local children = character:GetChildren()
+		for i = 1, #children do
+			if string.find(string.lower(children[i].Name), pattern, 1, true) then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+---------------------------------------------------
+-- TARGET ACQUISITION
+---------------------------------------------------
+
+local ROOT_PRIORITY = { "HumanoidRootPart", "UpperTorso", "Torso", "LowerTorso", "Head" }
+
+local function getRoot()
+	if currentRoot and currentRoot.Parent then
+		return currentRoot
+	end
+	local character = currentCharacter or LocalPlayer.Character
+	if not character then return nil end
+	
+	for i = 1, #ROOT_PRIORITY do
+		local part = character:FindFirstChild(ROOT_PRIORITY[i])
+		if part and part:IsA("BasePart") then
+			currentRoot = part
+			return part
+		end
+	end
+	return nil
+end
+
+local function getClosestPad(baseName)
+	local root = getRoot()
+	if not root then return nil end
+	local pads = padsByBase[baseName]
+	if not pads or #pads == 0 then return nil end
+	
+	local closest = nil
+	local bestDistance = PAD_RANGE
+	local rootPos = root.Position
+	
+	for i = 1, #pads do
+		local pad = pads[i]
+		if pad and pad.Parent then
+			local distance = (pad.Position - rootPos).Magnitude
+			if distance < bestDistance then
+				bestDistance = distance
+				closest = pad
+			end
+		end
+	end
+	return closest
+end
+
+---------------------------------------------------
+-- HARD UNBOUND TOUCH MECHANISM
+---------------------------------------------------
+
+local function tapPadInstant(root, pad, burstCount)
+	if type(firetouchinterest) ~= "function" then return end
+	
+	-- Completely unbound raw structural loop for maximum network saturation 
+	for i = 1, burstCount do
+		firetouchinterest(root, pad, 0)
+		firetouchinterest(root, pad, 1)
+	end
+end
+
+local function processQuantumSequence(currentSerial)
+	local root = getRoot()
+	if not root then return end
+
+	local now = os.clock()
+	local forceAll = (now < forceAllUntil)
+	local isSpawning = (now - forceAllUntil < INSTANT_RESPAWN_WINDOW)
+	local burst = isSpawning and SPAWN_TOUCH_BURST or TOUCH_BURST
+
+	for i = 1, #TOOL_RULES do
+		if not alive or currentSerial ~= scheduleSerial then return end
+		local rule = TOOL_RULES[i]
+		local baseName = rule.Base
+		
+		local forced = rule.ForceBase or forceAll or (baseForceUntil[baseName] and now < baseForceUntil[baseName])
+
+		if forced or not hasTool(rule.Pattern) then
+			local pad = getClosestPad(baseName)
+			if pad then
+				tapPadInstant(root, pad, burst)
+				
+				if FORCED_BASE_TOUCHES[baseName] then
+					baseTouchCounts[baseName] = (baseTouchCounts[baseName] or 0) + 1
+					if baseTouchCounts[baseName] >= FORCED_BASE_TOUCHES[baseName] then
+						baseForceUntil[baseName] = 0
+					end
+				end
+			end
+		end
+	end
+end
+
+local function triggerAcquire()
+	if acquireRunning then return end
+	acquireRunning = true
+	scheduleSerial = scheduleSerial + 1
+	local currentSerial = scheduleSerial
+
+	-- Uses Heartbeat loop framework to execute instantly before physics calculations update
+	task.spawn(function()
+		while alive and currentSerial == scheduleSerial do
+			processQuantumSequence(currentSerial)
+			if QUICK_RECHECK_DELAY > 0 then
+				task.wait(QUICK_RECHECK_DELAY)
+			else
+				RunService.Heartbeat:Wait()
+			end
+		end
+		acquireRunning = false
+	end)
+end
+
+---------------------------------------------------
+-- LIFE FRAMEWORK PIPELINE
+---------------------------------------------------
+
+local function onCharacterReady(character)
+	if not character then return end
+	currentCharacter = character
+	currentRoot = nil
+	lifeSerial = lifeSerial + 1
+
+	disconnectList(characterConnections)
+
+	local humanoid = character:WaitForChild("Humanoid", 5)
+	if humanoid then
+		trackCharacter(humanoid.Died:Connect(function()
+			forceAllUntil = 0
+			table.clear(baseForceUntil)
+			table.clear(baseTouchCounts)
+		end))
+	end
+
+	forceAllUntil = os.clock() + SPAWN_FORCE_ALL_TIME
+	for i = 1, #ALLOWED_BASE_ORDER do
+		baseForceUntil[ALLOWED_BASE_ORDER[i]] = os.clock() + SPAWN_FORCE_TIME
+	end
+	table.clear(baseTouchCounts)
+
+	-- Absolute direct first frame call
+	triggerAcquire()
+end
+
+if LocalPlayer.Character then
+task.spawn(onCharacterReady, LocalPlayer.Character)
+end
+track(LocalPlayer.CharacterAdded:Connect(function(character)
+task.spawn(onCharacterReady, character)
+end))
+-- Direct hook to step processing cycle
+track(RunService.Stepped:Connect(function()
+if alive then
+triggerAcquire()
+end
+end))
+_G.SmartHubToolGrabber = { Cleanup = cleanup }
