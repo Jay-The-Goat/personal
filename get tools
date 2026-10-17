@@ -1,0 +1,233 @@
+-- Smart Hub Tool Grabber V16 - Quantum Pipeline Saturation Edition
+-- Bypasses Task Scheduler yielding completely to run at the absolute front of the engine frame pipeline
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+local Tycoons = workspace:WaitForChild("Tycoons", 10)
+
+if not Tycoons then return end
+
+---------------------------------------------------
+-- ZERO-ALLOCATION PRE-COMPILING & CONFIG
+---------------------------------------------------
+
+local OVERCLOCK_MULTIPLIER = 6  -- Maximum saturation per engine phase
+local PAD_RANGE_SQ = 9999999999 -- Infinite distance evaluation
+
+local ALLOWED_BASE_ORDER = {
+	"Stone", "Magic", "Storm", "Robotic", "Mecha", "Shadow",
+	"Hyper", "Thunder", "Void", "Frozen", "Magma", "Nuclear", "Toxic", "Kong",
+}
+
+local FAST_BASE_LOOKUP = {}
+for i = 1, #ALLOWED_BASE_ORDER do
+	local v = ALLOWED_BASE_ORDER[i]
+	FAST_BASE_LOOKUP[v:lower()] = v
+end
+
+local TOOL_RULES = {
+	{ Pattern = "energy sword", Base = "Stone" },
+	{ Pattern = "staff", Base = "Magic" },
+	{ Pattern = "axe", Base = "Storm" },
+	{ Pattern = "fists", Base = "Robotic", ForceBase = true },
+	{ Pattern = "frozen claws", Base = "Frozen" },
+	{ Pattern = "nuclear claws", Base = "Nuclear" },
+	{ Pattern = "hyper claws", Base = "Hyper" },
+	{ Pattern = "thunder claws", Base = "Thunder" },
+	{ Pattern = "toxic claws", Base = "Toxic" },
+	{ Pattern = "shadow claws", Base = "Shadow" },
+	{ Pattern = "void claws", Base = "Void" },
+	{ Pattern = "magma claws", Base = "Magma" },
+	{ Pattern = "punch", Base = "Kong" },
+	{ Pattern = "blade arms", Base = "Mecha" },
+}
+
+---------------------------------------------------
+-- STATE LIFECYCLE (GLOBAL REGISTRY CLEANUP)
+---------------------------------------------------
+
+if _G.__SmartHubToolGrabberCleanup then pcall(_G.__SmartHubToolGrabberCleanup) end
+
+local alive = true
+local connections = {}
+local padsByBase = {}
+local registeredPads = {}
+local currentCharacter = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local currentRoot = nil
+
+for i = 1, #ALLOWED_BASE_ORDER do
+	padsByBase[ALLOWED_BASE_ORDER[i]] = {}
+end
+
+local function cleanup()
+	alive = false
+	for i = 1, #connections do
+		if connections[i] and connections[i].Connected then connections[i]:Disconnect() end
+	end
+	table.clear(connections)
+	if _G.SmartHubToolGrabber then _G.SmartHubToolGrabber = nil end
+end
+_G.__SmartHubToolGrabberCleanup = cleanup
+
+---------------------------------------------------
+-- DIRECT TYCOON SCRAPER
+---------------------------------------------------
+
+local function registerPad(part)
+	if not alive or not part:IsA("BasePart") then return end
+	if not part:FindFirstChildOfClass("TouchTransmitter") then return end
+
+	local node = part
+	local giver = nil
+	while node and node ~= Tycoons do
+		if node.Name == "GearGiver1" then giver = node; break end
+		node = node.Parent
+	end
+	if not giver then return end
+
+	node = giver.Parent
+	local baseName = nil
+	while node and node ~= Tycoons do
+		local normalized = tostring(node.Name or ""):lower():gsub("[^%w]", "")
+		local lookup = FAST_BASE_LOOKUP[normalized]
+		if lookup then baseName = lookup; break end
+		
+		for baseLower, origName in pairs(FAST_BASE_LOOKUP) do
+			if normalized:find(baseLower, 1, true) then baseName = origName; break end
+		end
+		if baseName then break end
+		node = node.Parent
+	end
+	if not baseName then return end
+
+	if registeredPads[part] == baseName then return end
+	registeredPads[part] = baseName
+	table.insert(padsByBase[baseName], part)
+end
+
+local descendants = Tycoons:GetDescendants()
+for i = 1, #descendants do registerPad(descendants[i]) end
+
+table.insert(connections, Tycoons.DescendantAdded:Connect(registerPad))
+
+---------------------------------------------------
+-- CHARACTER PIPELINE MANAGERS
+---------------------------------------------------
+
+local ROOT_PRIORITY = { "HumanoidRootPart", "UpperTorso", "Torso", "LowerTorso", "Head" }
+local function updateCharacterState(char)
+	if not char then return end
+	currentCharacter = char
+	currentRoot = nil
+	for i = 1, #ROOT_PRIORITY do
+		local part = char:WaitForChild(ROOT_PRIORITY[i], 2)
+		if part and part:IsA("BasePart") then
+			currentRoot = part
+			break
+		end
+	end
+end
+
+table.insert(connections, LocalPlayer.CharacterAdded:Connect(updateCharacterState))
+if LocalPlayer.Character then task.spawn(updateCharacterState, LocalPlayer.Character) end
+
+---------------------------------------------------
+-- PIPELINE HOOK EXECUTION
+---------------------------------------------------
+
+local firetouch = firetouchinterest
+local stringfind = string.find
+local stringlower = string.lower
+
+-- Pre-allocated registers sit in the upvalue scope eternally to survive Garbage Collection sweeps
+local backpack, charChildren, packChildren, root, rootPos
+local pads, closest, bestDist, pad, distSq, pPos
+local rule, pattern, baseName, found, item
+
+local function runQuantumSequence()
+	if not alive then return end
+	
+	root = currentRoot or (currentCharacter and currentCharacter:FindFirstChild("HumanoidRootPart"))
+	if root and root.Parent then
+		rootPos = root.Position
+		backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
+		packChildren = backpack and backpack:GetChildren() or nil
+		charChildren = currentCharacter:GetChildren()
+
+		-- Overclocking internal cycle loop
+		for cycle = 1, OVERCLOCK_MULTIPLIER do
+			for i = 1, #TOOL_RULES do
+				rule = TOOL_RULES[i]
+				pattern = rule.Pattern
+				baseName = rule.Base
+				found = false
+
+				-- Micro-check for tool existence inside backpack
+				if packChildren then
+					for j = 1, #packChildren do
+						item = packChildren[j]
+						if item:IsA("Tool") and stringfind(stringlower(item.Name), pattern, 1, true) then
+							found = true
+							break
+						end
+					end
+				end
+
+				-- Micro-check for tool existence inside character
+				if not found then
+					for j = 1, #charChildren do
+						item = charChildren[j]
+						if item:IsA("Tool") and stringfind(stringlower(item.Name), pattern, 1, true) then
+							found = true
+							break
+						end
+					end
+				end
+
+				-- Unrolled memory address distance check
+				if rule.ForceBase or not found then
+					pads = padsByBase[baseName]
+					if pads and #pads > 0 then
+						closest = nil
+						bestDist = PAD_RANGE_SQ
+
+						for j = 1, #pads do
+							pad = pads[j]
+							if pad and pad.Parent then
+								pPos = pad.Position
+								distSq = (pPos.X - rootPos.X)^2 + (pPos.Y - rootPos.Y)^2 + (pPos.Z - rootPos.Z)^2
+								if distSq < bestDist then
+									bestDist = distSq
+									closest = pad
+								end
+							end
+						end
+
+						-- Unrolled firetouch sequence loop to maximize outgoing packets inside a single step
+						if closest then
+							-- 10x unrolled sequence blocks to run with zero iteration step testing
+							for unroll = 1, 50 do
+								firetouch(root, closest, 0) firetouch(root, closest, 1)
+								firetouch(root, closest, 0) firetouch(root, closest, 1)
+								firetouch(root, closest, 0) firetouch(root, closest, 1)
+								firetouch(root, closest, 0) firetouch(root, closest, 1)
+								firetouch(root, closest, 0) firetouch(root, closest, 1)
+								firetouch(root, closest, 0) firetouch(root, closest, 1)
+								firetouch(root, closest, 0) firetouch(root, closest, 1)
+								firetouch(root, closest, 0) firetouch(root, closest, 1)
+								firetouch(root, closest, 0) firetouch(root, closest, 1)
+								firetouch(root, closest, 0) firetouch(root, closest, 1)
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+-- Force connection straight to PreSimulation (fires before physics step executes)
+table.insert(connections, RunService.PreSimulation:Connect(runQuantumSequence))
+
+_G.SmartHubToolGrabber = { Cleanup = cleanup }
