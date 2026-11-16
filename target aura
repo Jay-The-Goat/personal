@@ -1,0 +1,42 @@
+local CoreGui = game:GetService("CoreGui")
+local UserInputService = game:GetService("UserInputService")
+local parentGui = (gethui and gethui()) or CoreGui
+
+if parentGui:FindFirstChild("UI_TargetAura") then parentGui.UI_TargetAura:Destroy() end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "UI_TargetAura"; gui.IgnoreGuiInset = true; gui.ResetOnSpawn = false; gui.Parent = parentGui
+
+local bar = Instance.new("Frame", gui)
+bar.Size = UDim2.fromOffset(210, 28)
+bar.Position = UDim2.new(0.5, -105, 0.02, 0)
+bar.BackgroundColor3 = Color3.fromRGB(16, 16, 20); bar.BackgroundTransparency = 0.05
+Instance.new("UICorner", bar).CornerRadius = UDim.new(0, 8)
+local s = Instance.new("UIStroke", bar); s.Color = Color3.fromRGB(228, 42, 54); s.Thickness = 1.4
+
+local state = true
+local toggle = Instance.new("TextButton", bar)
+toggle.Size = UDim2.new(0.58, 0, 1, -6); toggle.Position = UDim2.fromOffset(3, 3)
+toggle.BackgroundColor3 = Color3.fromRGB(18, 48, 34); toggle.Text = "⚡ TARGET AURA: ON"
+toggle.Font = Enum.Font.GothamBold; toggle.TextSize = 9; toggle.TextColor3 = Color3.fromRGB(46, 213, 115)
+toggle.AutoButtonColor = false
+Instance.new("UICorner", toggle).CornerRadius = UDim.new(0, 6)
+
+toggle.MouseButton1Click:Connect(function()
+	state = not state
+	toggle.Text = state and "⚡ TARGET AURA: ON" or "⚡ TARGET AURA: OFF"
+	toggle.BackgroundColor3 = state and Color3.fromRGB(18, 48, 34) or Color3.fromRGB(26, 26, 33)
+	toggle.TextColor3 = state and Color3.fromRGB(46, 213, 115) or Color3.fromRGB(165, 165, 180)
+end)
+
+local allBtn = Instance.new("TextButton", bar)
+allBtn.Size = UDim2.new(0.18, 0, 1, -6); allBtn.Position = UDim2.new(0.60, 0, 0, 3)
+allBtn.BackgroundColor3 = Color3.fromRGB(26, 26, 33); allBtn.Text = "ALL"
+allBtn.Font = Enum.Font.GothamBold; allBtn.TextSize = 9; allBtn.TextColor3 = Color3.fromRGB(245, 245, 250)
+Instance.new("UICorner", allBtn).CornerRadius = UDim.new(0, 6)
+
+local clrBtn = Instance.new("TextButton", bar)
+clrBtn.Size = UDim2.new(0.18, 0, 1, -6); clrBtn.Position = UDim2.new(0.80, 0, 0, 3)
+clrBtn.BackgroundColor3 = Color3.fromRGB(26, 26, 33); clrBtn.Text = "CLR"
+clrBtn.Font = Enum.Font.GothamBold; clrBtn.TextSize = 9; clrBtn.TextColor3 = Color3.fromRGB(245, 245, 250)
+Instance.new("UICorner", clrBtn).CornerRadius = UDim.new(0, 6)
