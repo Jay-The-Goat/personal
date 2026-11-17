@@ -1,0 +1,146 @@
+local CoreGui = game:GetService("CoreGui")
+local UIS = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+
+local parent = (gethui and gethui()) or CoreGui
+if parent:FindFirstChild("UI_HitAmplifier") then parent.UI_HitAmplifier:Destroy() end
+
+local gui = Instance.new("ScreenGui", parent)
+gui.Name = "UI_HitAmplifier"
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+
+local scale = Instance.new("UIScale", gui)
+local function updateScale()
+	local cam = Workspace.CurrentCamera
+	if cam then scale.Scale = math.clamp(cam.ViewportSize.Y / 430, 0.68, 1.05) end
+end
+updateScale()
+if Workspace.CurrentCamera then Workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateScale) end
+
+local card = Instance.new("Frame", gui)
+card.Size = UDim2.fromOffset(152, 70)
+card.Position = UDim2.new(1, -164, 0, 110)
+card.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
+card.BackgroundTransparency = 0.05
+Instance.new("UICorner", card).CornerRadius = UDim.new(0, 10)
+local stroke = Instance.new("UIStroke", card)
+stroke.Color = Color3.fromRGB(228, 42, 54)
+stroke.Thickness = 1.4
+
+local title = Instance.new("TextLabel", card)
+title.Size = UDim2.new(1, -22, 0, 18)
+title.Position = UDim2.fromOffset(8, 4)
+title.BackgroundTransparency = 1
+title.Text = "⚡ HIT AMPLIFIER"
+title.Font = Enum.Font.GothamBlack
+title.TextSize = 9.5
+title.TextColor3 = Color3.fromRGB(228, 42, 54)
+title.TextXAlignment = Enum.TextXAlignment.Left
+
+local led = Instance.new("Frame", card)
+led.Size = UDim2.fromOffset(7, 7)
+led.Position = UDim2.new(1, -13, 0, 9)
+led.BackgroundColor3 = Color3.fromRGB(228, 42, 54)
+Instance.new("UICorner", led).CornerRadius = UDim.new(0, 4)
+
+local state = false
+local toggle = Instance.new("TextButton", card)
+toggle.Size = UDim2.new(0.62, 0, 0, 22)
+toggle.Position = UDim2.fromOffset(8, 25)
+toggle.BackgroundColor3 = Color3.fromRGB(26, 26, 33)
+toggle.Text = "OFF"
+toggle.Font = Enum.Font.GothamBold
+toggle.TextSize = 10
+toggle.TextColor3 = Color3.fromRGB(165, 165, 180)
+toggle.AutoButtonColor = false
+Instance.new("UICorner", toggle).CornerRadius = UDim.new(0, 6)
+local tStroke = Instance.new("UIStroke", toggle)
+tStroke.Color = Color3.fromRGB(130, 26, 34)
+
+local keyBtn = Instance.new("TextButton", card)
+keyBtn.Size = UDim2.new(0.25, 0, 0, 22)
+keyBtn.Position = UDim2.new(0.69, 0, 0, 25)
+keyBtn.BackgroundColor3 = Color3.fromRGB(26, 26, 33)
+keyBtn.Text = "[X]"
+keyBtn.Font = Enum.Font.GothamBold
+keyBtn.TextSize = 9.5
+keyBtn.TextColor3 = Color3.fromRGB(245, 245, 250)
+Instance.new("UICorner", keyBtn).CornerRadius = UDim.new(0, 6)
+Instance.new("UIStroke", keyBtn).Color = Color3.fromRGB(130, 26, 34)
+
+local multVal = 10
+local stepFrame = Instance.new("Frame", card)
+stepFrame.Size = UDim2.new(1, -16, 0, 18)
+stepFrame.Position = UDim2.fromOffset(8, 50)
+stepFrame.BackgroundColor3 = Color3.fromRGB(26, 26, 33)
+Instance.new("UICorner", stepFrame).CornerRadius = UDim.new(0, 5)
+Instance.new("UIStroke", stepFrame).Color = Color3.fromRGB(130, 26, 34)
+
+local minus = Instance.new("TextButton", stepFrame)
+minus.Size = UDim2.new(0.25, 0, 1, 0)
+minus.BackgroundTransparency = 1
+minus.Text = "-"
+minus.Font = Enum.Font.GothamBold
+minus.TextSize = 12
+minus.TextColor3 = Color3.fromRGB(228, 42, 54)
+
+local valLbl = Instance.new("TextLabel", stepFrame)
+valLbl.Size = UDim2.new(0.5, 0, 1, 0)
+valLbl.Position = UDim2.new(0.25, 0, 0, 0)
+valLbl.BackgroundTransparency = 1
+valLbl.Text = "10x"
+valLbl.Font = Enum.Font.GothamBold
+valLbl.TextSize = 9.5
+valLbl.TextColor3 = Color3.fromRGB(245, 245, 250)
+
+local plus = Instance.new("TextButton", stepFrame)
+plus.Size = UDim2.new(0.25, 0, 1, 0)
+plus.Position = UDim2.new(0.75, 0, 0, 0)
+plus.BackgroundTransparency = 1
+plus.Text = "+"
+plus.Font = Enum.Font.GothamBold
+plus.TextSize = 12
+plus.TextColor3 = Color3.fromRGB(228, 42, 54)
+
+minus.MouseButton1Click:Connect(function()
+	multVal = math.max(1, multVal - 1)
+	valLbl.Text = multVal .. "x"
+end)
+plus.MouseButton1Click:Connect(function()
+	multVal = math.min(50, multVal + 1)
+	valLbl.Text = multVal .. "x"
+end)
+
+local function onToggle()
+	state = not state
+	toggle.Text = state and "ON" or "OFF"
+	toggle.BackgroundColor3 = state and Color3.fromRGB(18, 48, 34) or Color3.fromRGB(26, 26, 33)
+	toggle.TextColor3 = state and Color3.fromRGB(46, 213, 115) or Color3.fromRGB(165, 165, 180)
+	tStroke.Color = state and Color3.fromRGB(46, 213, 115) or Color3.fromRGB(130, 26, 34)
+	led.BackgroundColor3 = state and Color3.fromRGB(46, 213, 115) or Color3.fromRGB(228, 42, 54)
+end
+
+toggle.MouseButton1Click:Connect(onToggle)
+keyBtn.MouseButton1Click:Connect(onToggle)
+UIS.InputBegan:Connect(function(i, gp)
+	if not gp and i.KeyCode == Enum.KeyCode.X then onToggle() end
+end)
+
+-- Draggable
+local drag, dInput, dStart, sPos
+card.InputBegan:Connect(function(i)
+	if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+		drag = true; dStart = i.Position; sPos = card.Position
+		i.Changed:Connect(function() if i.UserInputState == Enum.UserInputState.End then drag = false end end)
+	end
+end)
+card.InputChanged:Connect(function(i)
+	if i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch then dInput = i end
+end)
+UIS.InputChanged:Connect(function(i)
+	if i == dInput and drag then
+		local d = (i.Position - dStart) / scale.Scale
+		card.Position = UDim2.new(sPos.X.Scale, sPos.X.Offset + d.X, sPos.Y.Scale, sPos.Y.Offset + d.Y)
+	end
+end)
