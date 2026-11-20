@@ -1,103 +1,472 @@
-local CoreGui = game:GetService("CoreGui")
-local UIS = game:GetService("UserInputService")
+-- ============================================================================
+-- CIPHER // INSTA-KILL BURST ENGINE V6.0 (COSMIC ETERNAL RESCRIPT)
+-- High-Performance Proximity Eliminator with Smart Burst & Cosmic UI
+-- Mobile Scaled // Cosmic Liquid Border Flow // Black & Purple Theme
+-- ============================================================================
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
-local parent = (gethui and gethui()) or CoreGui
-if parent:FindFirstChild("UI_InstaKill") then parent.UI_InstaKill:Destroy() end
+local LocalPlayer = Players.LocalPlayer or Players:GetPropertyChangedSignal("LocalPlayer"):Wait()
 
-local gui = Instance.new("ScreenGui", parent)
-gui.Name = "UI_InstaKill"
-gui.ResetOnSpawn = false
-gui.IgnoreGuiInset = true
+-- Executor API Resolver
+local fireTouch: ((BasePart, BasePart, number) -> ())? = (firetouchinterest :: any)
+	or (getgenv and (getgenv().firetouchinterest or getgenv().fire_touch_interest))
+	or (syn and syn.firetouchinterest)
 
-local scale = Instance.new("UIScale", gui)
-local function updateScale()
+-- ============================================================================
+-- THEME & CONFIGURATION (COSMIC ETERNAL)
+-- ============================================================================
+local THEME = {
+	VoidBg          = Color3.fromRGB(10, 8, 16),
+	PanelBg         = Color3.fromRGB(18, 13, 28),
+	CardBg          = Color3.fromRGB(26, 18, 42),
+	CardHover       = Color3.fromRGB(38, 26, 62),
+	AccentPurple    = Color3.fromRGB(168, 85, 247),
+	AccentLight     = Color3.fromRGB(192, 132, 252),
+	AccentDeep      = Color3.fromRGB(88, 28, 135),
+	BorderDark      = Color3.fromRGB(35, 20, 55),
+	TextWhite       = Color3.fromRGB(255, 255, 255),
+	TextMuted       = Color3.fromRGB(170, 160, 195),
+	ActiveGreen     = Color3.fromRGB(52, 211, 153),
+}
+
+local RANGE: number           = 50
+local RANGE_SQ: number        = RANGE * RANGE
+local TOUCH_BURST: number     = 3
+local REMOTE_BURST: number    = 2
+local ATTACK_INTERVAL: number = 1 / 30
+local TOGGLE_KEY: Enum.KeyCode = Enum.KeyCode.K
+local Active: boolean         = true
+
+-- State
+local toolList: { Tool }                   = {}
+local touchCache: { [Tool]: BasePart }     = {}
+local remoteCache: { [Tool]: RemoteEvent } = {}
+
+local currentTargetPlayer: Player?         = nil
+local currentTargetHum: Humanoid?          = nil
+local currentTargetRoot: BasePart?         = nil
+local currentPriorityParts: { BasePart }   = {}
+local lastAttackTime: number               = 0
+
+-- Priority Parts
+local PRIORITY_PARTS = {
+	"HumanoidRootPart",
+	"Head",
+	"UpperTorso",
+	"Torso",
+}
+
+-- ============================================================================
+-- SAFE GUI RESOLVER
+-- ============================================================================
+local function getGuiContainer(): Instance
+	local success, core = pcall(function()
+		return game:GetService("CoreGui")
+	end)
+	if success and core then
+		local canWrite = pcall(function()
+			local test = Instance.new("Folder")
+			test.Parent = core
+			test:Destroy()
+		end)
+		if canWrite then
+			return core
+		end
+	end
+	return LocalPlayer:WaitForChild("PlayerGui")
+end
+
+local guiContainer = getGuiContainer()
+local existing = guiContainer:FindFirstChild("CipherInstaKillUI")
+if existing then
+	existing:Destroy()
+end
+
+-- ============================================================================
+-- COSMIC LIQUID UI & MOBILE SCALING
+-- ============================================================================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "CipherInstaKillUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.Parent = guiContainer
+
+local MainCard = Instance.new("Frame")
+MainCard.Name = "MainCard"
+MainCard.Size = UDim2.fromOffset(230, 68)
+MainCard.Position = UDim2.new(0.5, -115, 0.09, 0)
+MainCard.BackgroundColor3 = THEME.PanelBg
+MainCard.BackgroundTransparency = 0.05
+MainCard.BorderSizePixel = 0
+MainCard.Active = true
+MainCard.Parent = ScreenGui
+
+-- Mobile Scaler
+local CardScale = Instance.new("UIScale")
+CardScale.Parent = MainCard
+
+local function updateMobileScaling()
 	local cam = Workspace.CurrentCamera
-	if cam then scale.Scale = math.clamp(cam.ViewportSize.Y / 430, 0.68, 1.05) end
+	local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
+	if vp.X < 650 or vp.Y < 480 then
+		local s = math.clamp(math.min(vp.X / 580, vp.Y / 420), 0.70, 0.95)
+		CardScale.Scale = s
+	else
+		CardScale.Scale = 1.0
+	end
 end
-updateScale()
-if Workspace.CurrentCamera then Workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateScale) end
-
-local card = Instance.new("Frame", gui)
-card.Size = UDim2.fromOffset(152, 54)
-card.Position = UDim2.new(1, -164, 0, 262)
-card.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
-card.BackgroundTransparency = 0.05
-Instance.new("UICorner", card).CornerRadius = UDim.new(0, 10)
-local stroke = Instance.new("UIStroke", card)
-stroke.Color = Color3.fromRGB(228, 42, 54)
-stroke.Thickness = 1.4
-
-local title = Instance.new("TextLabel", card)
-title.Size = UDim2.new(1, -22, 0, 18)
-title.Position = UDim2.fromOffset(8, 4)
-title.BackgroundTransparency = 1
-title.Text = "⚡ INSTA-KILL // BURST"
-title.Font = Enum.Font.GothamBlack
-title.TextSize = 9.5
-title.TextColor3 = Color3.fromRGB(228, 42, 54)
-title.TextXAlignment = Enum.TextXAlignment.Left
-
-local led = Instance.new("Frame", card)
-led.Size = UDim2.fromOffset(7, 7)
-led.Position = UDim2.new(1, -13, 0, 9)
-led.BackgroundColor3 = Color3.fromRGB(228, 42, 54)
-Instance.new("UICorner", led).CornerRadius = UDim.new(0, 4)
-
-local state = false
-local toggle = Instance.new("TextButton", card)
-toggle.Size = UDim2.new(0.62, 0, 0, 22)
-toggle.Position = UDim2.fromOffset(8, 25)
-toggle.BackgroundColor3 = Color3.fromRGB(26, 26, 33)
-toggle.Text = "OFF"
-toggle.Font = Enum.Font.GothamBold
-toggle.TextSize = 10
-toggle.TextColor3 = Color3.fromRGB(165, 165, 180)
-toggle.AutoButtonColor = false
-Instance.new("UICorner", toggle).CornerRadius = UDim.new(0, 6)
-local tStroke = Instance.new("UIStroke", toggle)
-tStroke.Color = Color3.fromRGB(130, 26, 34)
-
-local keyBtn = Instance.new("TextButton", card)
-keyBtn.Size = UDim2.new(0.25, 0, 0, 22)
-keyBtn.Position = UDim2.new(0.69, 0, 0, 25)
-keyBtn.BackgroundColor3 = Color3.fromRGB(26, 26, 33)
-keyBtn.Text = "[V]"
-keyBtn.Font = Enum.Font.GothamBold
-keyBtn.TextSize = 9.5
-keyBtn.TextColor3 = Color3.fromRGB(245, 245, 250)
-Instance.new("UICorner", keyBtn).CornerRadius = UDim.new(0, 6)
-Instance.new("UIStroke", keyBtn).Color = Color3.fromRGB(130, 26, 34)
-
-local function onToggle()
-	state = not state
-	toggle.Text = state and "ON" or "OFF"
-	toggle.BackgroundColor3 = state and Color3.fromRGB(18, 48, 34) or Color3.fromRGB(26, 26, 33)
-	toggle.TextColor3 = state and Color3.fromRGB(46, 213, 115) or Color3.fromRGB(165, 165, 180)
-	tStroke.Color = state and Color3.fromRGB(46, 213, 115) or Color3.fromRGB(130, 26, 34)
-	led.BackgroundColor3 = state and Color3.fromRGB(46, 213, 115) or Color3.fromRGB(228, 42, 54)
+updateMobileScaling()
+if Workspace.CurrentCamera then
+	Workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateMobileScaling)
 end
 
-toggle.MouseButton1Click:Connect(onToggle)
-keyBtn.MouseButton1Click:Connect(onToggle)
-UIS.InputBegan:Connect(function(i, gp)
-	if not gp and i.KeyCode == Enum.KeyCode.V then onToggle() end
+local CardCorner = Instance.new("UICorner")
+CardCorner.CornerRadius = UDim.new(0, 9)
+CardCorner.Parent = MainCard
+
+local CardStroke = Instance.new("UIStroke")
+CardStroke.Thickness = 1.5
+CardStroke.Color = THEME.AccentPurple
+CardStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+CardStroke.Parent = MainCard
+
+-- Cosmic Liquid Animated Gradient for Border
+local BorderGradient = Instance.new("UIGradient")
+BorderGradient.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0.00, THEME.AccentPurple),
+	ColorSequenceKeypoint.new(0.25, THEME.VoidBg),
+	ColorSequenceKeypoint.new(0.50, THEME.AccentLight),
+	ColorSequenceKeypoint.new(0.75, THEME.AccentDeep),
+	ColorSequenceKeypoint.new(1.00, THEME.AccentPurple),
+})
+BorderGradient.Parent = CardStroke
+
+-- Header
+local Header = Instance.new("Frame")
+Header.Name = "Header"
+Header.Size = UDim2.new(1, 0, 0, 22)
+Header.BackgroundColor3 = THEME.CardBg
+Header.BorderSizePixel = 0
+Header.Parent = MainCard
+
+local HeaderCorner = Instance.new("UICorner")
+HeaderCorner.CornerRadius = UDim.new(0, 9)
+HeaderCorner.Parent = Header
+
+local HeaderTitle = Instance.new("TextLabel")
+HeaderTitle.Size = UDim2.new(1, -24, 1, 0)
+HeaderTitle.Position = UDim2.new(0, 8, 0, 0)
+HeaderTitle.BackgroundTransparency = 1
+HeaderTitle.Font = Enum.Font.GothamBold
+HeaderTitle.TextSize = 10
+HeaderTitle.TextColor3 = THEME.TextWhite
+HeaderTitle.TextXAlignment = Enum.TextXAlignment.Left
+HeaderTitle.Text = "⚡ INSTA-KILL // BURST [K]"
+HeaderTitle.Parent = Header
+
+-- Cosmic Liquid Flow on Text
+local TitleGradient = Instance.new("UIGradient")
+TitleGradient.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0.00, THEME.TextWhite),
+	ColorSequenceKeypoint.new(0.35, THEME.AccentLight),
+	ColorSequenceKeypoint.new(0.70, THEME.AccentPurple),
+	ColorSequenceKeypoint.new(1.00, THEME.TextWhite),
+})
+TitleGradient.Parent = HeaderTitle
+
+RunService.RenderStepped:Connect(function(dt: number)
+	BorderGradient.Rotation = (BorderGradient.Rotation + dt * 50) % 360
+	TitleGradient.Rotation = (TitleGradient.Rotation + dt * 35) % 360
 end)
 
--- Draggable
-local drag, dInput, dStart, sPos
-card.InputBegan:Connect(function(i)
-	if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-		drag = true; dStart = i.Position; sPos = card.Position
-		i.Changed:Connect(function() if i.UserInputState == Enum.UserInputState.End then drag = false end end)
+local StatusDot = Instance.new("Frame")
+StatusDot.Size = UDim2.fromOffset(7, 7)
+StatusDot.Position = UDim2.new(1, -14, 0.5, -3)
+StatusDot.BackgroundColor3 = THEME.ActiveGreen
+StatusDot.BorderSizePixel = 0
+StatusDot.Parent = Header
+
+local DotCorner = Instance.new("UICorner")
+DotCorner.CornerRadius = UDim.new(1, 0)
+DotCorner.Parent = StatusDot
+
+-- Interactive Toggle Button
+local ToggleButton = Instance.new("TextButton")
+ToggleButton.Name = "ToggleButton"
+ToggleButton.Size = UDim2.new(1, -14, 0, 24)
+ToggleButton.Position = UDim2.new(0, 7, 0, 25)
+ToggleButton.BackgroundColor3 = THEME.CardBg
+ToggleButton.Font = Enum.Font.GothamBold
+ToggleButton.TextSize = 10
+ToggleButton.TextColor3 = THEME.ActiveGreen
+ToggleButton.Text = "INSTA-KILL: ACTIVE"
+ToggleButton.AutoButtonColor = false
+ToggleButton.Parent = MainCard
+
+local BtnCorner = Instance.new("UICorner")
+BtnCorner.CornerRadius = UDim.new(0, 6)
+BtnCorner.Parent = ToggleButton
+
+local BtnStroke = Instance.new("UIStroke")
+BtnStroke.Thickness = 1
+BtnStroke.Color = THEME.BorderDark
+BtnStroke.Parent = ToggleButton
+
+-- Target Info Label
+local TargetLabel = Instance.new("TextLabel")
+TargetLabel.Size = UDim2.new(1, -14, 0, 16)
+TargetLabel.Position = UDim2.new(0, 7, 0, 50)
+TargetLabel.BackgroundTransparency = 1
+TargetLabel.Font = Enum.Font.Gotham
+TargetLabel.TextSize = 9
+TargetLabel.TextColor3 = THEME.TextMuted
+TargetLabel.TextXAlignment = Enum.TextXAlignment.Left
+TargetLabel.Text = "Target: [Searching...]"
+TargetLabel.Parent = MainCard
+
+-- Draggable implementation
+local function setupDraggable(targetFrame: Frame, dragAnchor: Frame)
+	local dragging = false
+	local dragStartPos = Vector2.zero
+	local frameStartPos = UDim2.new()
+
+	dragAnchor.InputBegan:Connect(function(input: InputObject)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			dragStartPos = Vector2.new(input.Position.X, input.Position.Y)
+			frameStartPos = targetFrame.Position
+		end
+	end)
+
+	UserInputService.InputChanged:Connect(function(input: InputObject)
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+			local delta = Vector2.new(input.Position.X, input.Position.Y) - dragStartPos
+			targetFrame.Position = UDim2.new(
+				frameStartPos.X.Scale,
+				frameStartPos.X.Offset + delta.X,
+				frameStartPos.Y.Scale,
+				frameStartPos.Y.Offset + delta.Y
+			)
+		end
+	end)
+
+	UserInputService.InputEnded:Connect(function(input: InputObject)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = false
+		end
+	end)
+end
+
+setupDraggable(MainCard, Header)
+
+ToggleButton.MouseEnter:Connect(function()
+	TweenService:Create(ToggleButton, TweenInfo.new(0.12), {BackgroundColor3 = THEME.CardHover}):Play()
+end)
+ToggleButton.MouseLeave:Connect(function()
+	TweenService:Create(ToggleButton, TweenInfo.new(0.12), {BackgroundColor3 = THEME.CardBg}):Play()
+end)
+
+local function updateUI()
+	if Active then
+		ToggleButton.Text = "INSTA-KILL: ACTIVE"
+		ToggleButton.TextColor3 = THEME.ActiveGreen
+		StatusDot.BackgroundColor3 = THEME.ActiveGreen
+		BtnStroke.Color = THEME.AccentPurple
+	else
+		ToggleButton.Text = "INSTA-KILL: STANDBY [K]"
+		ToggleButton.TextColor3 = THEME.TextMuted
+		StatusDot.BackgroundColor3 = THEME.BorderDark
+		BtnStroke.Color = THEME.BorderDark
+		TargetLabel.Text = "Target: [Offline]"
+	end
+end
+
+local function toggleActive()
+	Active = not Active
+	updateUI()
+end
+
+ToggleButton.MouseButton1Click:Connect(toggleActive)
+
+UserInputService.InputBegan:Connect(function(input: InputObject, gpe: boolean)
+	if gpe then return end
+	if input.KeyCode == TOGGLE_KEY then
+		toggleActive()
 	end
 end)
-card.InputChanged:Connect(function(i)
-	if i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch then dInput = i end
-end)
-UIS.InputChanged:Connect(function(i)
-	if i == dInput and drag then
-		local d = (i.Position - dStart) / scale.Scale
-		card.Position = UDim2.new(sPos.X.Scale, sPos.X.Offset + d.X, sPos.Y.Scale, sPos.Y.Offset + d.Y)
+
+-- ============================================================================
+-- TOOL CACHING ENGINE
+-- ============================================================================
+local function findFightRemote(tool: Tool): RemoteEvent?
+	local r = tool:FindFirstChild("FightEvent")
+	if r and r:IsA("RemoteEvent") then return r end
+	for _, obj in ipairs(tool:GetChildren()) do
+		if obj:IsA("RemoteEvent") then
+			local n = string.lower(obj.Name)
+			if string.find(n, "fight", 1, true) or string.find(n, "slap", 1, true) or string.find(n, "hit", 1, true) then
+				return obj
+			end
+		end
+	end
+	return nil
+end
+
+local function rebuildToolCache()
+	table.clear(toolList)
+	table.clear(touchCache)
+	table.clear(remoteCache)
+
+	local char = LocalPlayer.Character
+	if not char then return end
+
+	for _, item in ipairs(char:GetChildren()) do
+		if item:IsA("Tool") then
+			table.insert(toolList, item)
+			local handle = item:FindFirstChild("Handle") or item:FindFirstChildWhichIsA("BasePart")
+			if handle and handle:IsA("BasePart") then
+				touchCache[item] = handle
+			end
+			local rem = findFightRemote(item)
+			if rem then
+				remoteCache[item] = rem
+			end
+		end
+	end
+end
+
+-- ============================================================================
+-- TARGET ACQUISITION & EXECUTION
+-- ============================================================================
+local function acquireNearestTarget()
+	local char = LocalPlayer.Character
+	if not char then
+		currentTargetPlayer = nil
+		currentTargetHum = nil
+		currentTargetRoot = nil
+		table.clear(currentPriorityParts)
+		return
+	end
+
+	local myRoot = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
+	if not (myRoot and myRoot:IsA("BasePart")) then return end
+
+	local myPos = myRoot.Position
+	local closestPlayer: Player? = nil
+	local closestDistSq: number = RANGE_SQ
+	local closestRoot: BasePart? = nil
+	local closestHum: Humanoid? = nil
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= LocalPlayer then
+			local pChar = player.Character
+			if pChar then
+				local hum = pChar:FindFirstChildOfClass("Humanoid")
+				local root = pChar:FindFirstChild("HumanoidRootPart") or pChar:FindFirstChild("Torso")
+				if hum and root and root:IsA("BasePart") and hum.Health > 0 then
+					local dx = root.Position.X - myPos.X
+					local dy = root.Position.Y - myPos.Y
+					local dz = root.Position.Z - myPos.Z
+					local distSq = dx * dx + dy * dy + dz * dz
+					if distSq < closestDistSq then
+						closestDistSq = distSq
+						closestPlayer = player
+						closestRoot = root
+						closestHum = hum
+					end
+				end
+			end
+		end
+	end
+
+	currentTargetPlayer = closestPlayer
+	currentTargetHum = closestHum
+	currentTargetRoot = closestRoot
+	table.clear(currentPriorityParts)
+
+	if closestPlayer and closestPlayer.Character then
+		local c = closestPlayer.Character
+		for _, partName in ipairs(PRIORITY_PARTS) do
+			local p = c:FindFirstChild(partName)
+			if p and p:IsA("BasePart") then
+				table.insert(currentPriorityParts, p)
+			end
+		end
+		local dist = math.sqrt(closestDistSq)
+		TargetLabel.Text = string.format("Target: %s (%.0f studs)", closestPlayer.DisplayName, dist)
+	else
+		TargetLabel.Text = "Target: [None in 50 studs]"
+	end
+end
+
+local function executeBurstStrike()
+	if not currentTargetRoot or not currentTargetRoot.Parent then return end
+	if currentTargetHum and currentTargetHum.Health <= 0 then return end
+
+	-- 1. Melee Combat Remotes
+	for _, tool in ipairs(toolList) do
+		local rem = remoteCache[tool]
+		if rem and rem.Parent and currentTargetRoot and currentTargetRoot.Parent then
+			for _ = 1, REMOTE_BURST do
+				pcall(rem.FireServer, rem, currentTargetRoot)
+			end
+		end
+	end
+
+	-- 2. Melee Touch Interests
+	if fireTouch then
+		for _, tool in ipairs(toolList) do
+			local toolPart = touchCache[tool]
+			if toolPart and toolPart.Parent then
+				for _, enemyPart in ipairs(currentPriorityParts) do
+					if enemyPart and enemyPart.Parent then
+						for _ = 1, TOUCH_BURST do
+							pcall(fireTouch, toolPart, enemyPart, 0)
+							pcall(fireTouch, toolPart, enemyPart, 1)
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+RunService.Heartbeat:Connect(function()
+	if not Active then return end
+
+	local now = os.clock()
+	if now - lastAttackTime < ATTACK_INTERVAL then return end
+	lastAttackTime = now
+
+	acquireNearestTarget()
+
+	if currentTargetRoot and #toolList > 0 then
+		executeBurstStrike()
 	end
 end)
+
+local function hookCharacter(char: Model)
+	rebuildToolCache()
+	char.ChildAdded:Connect(function(child: Instance)
+		if child:IsA("Tool") then
+			task.defer(rebuildToolCache)
+		end
+	end)
+	char.ChildRemoved:Connect(function(child: Instance)
+		if child:IsA("Tool") then
+			task.defer(rebuildToolCache)
+		end
+	end)
+end
+
+if LocalPlayer.Character then
+	hookCharacter(LocalPlayer.Character)
+end
+LocalPlayer.CharacterAdded:Connect(hookCharacter)
+
+print("⚡ [Insta-Kill] CIPHER // V6.0 Cosmic Eternal Loaded.")
