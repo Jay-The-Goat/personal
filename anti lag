@@ -1,53 +1,456 @@
-local CoreGui = game:GetService("CoreGui")
+-- ============================================================================
+-- CIPHER // ULTRA ANTI-LAG & FPS BOOSTER V6.0 (COSMIC ETERNAL RESCRIPT)
+-- High-Performance Client Optimizer with Full State Restoration & Cosmic UI
+-- Mobile Scaled // Cosmic Liquid Border Flow // Black & Purple Theme
+-- ============================================================================
+
+local Lighting = game:GetService("Lighting")
+local Workspace = game:GetService("Workspace")
+local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
-local parentGui = (gethui and gethui()) or CoreGui
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local Terrain = Workspace.Terrain
 
-if parentGui:FindFirstChild("UI_AntiLag") then parentGui.UI_AntiLag:Destroy() end
+local LocalPlayer = Players.LocalPlayer or Players:GetPropertyChangedSignal("LocalPlayer"):Wait()
 
-local gui = Instance.new("ScreenGui")
-gui.Name = "UI_AntiLag"; gui.IgnoreGuiInset = true; gui.ResetOnSpawn = false; gui.Parent = parentGui
+-- ============================================================================
+-- THEME & CONFIGURATION (COSMIC ETERNAL)
+-- ============================================================================
+local THEME = {
+	VoidBg          = Color3.fromRGB(10, 8, 16),
+	PanelBg         = Color3.fromRGB(18, 13, 28),
+	CardBg          = Color3.fromRGB(26, 18, 42),
+	CardHover       = Color3.fromRGB(38, 26, 62),
+	AccentPurple    = Color3.fromRGB(168, 85, 247),
+	AccentLight     = Color3.fromRGB(192, 132, 252),
+	AccentDeep      = Color3.fromRGB(88, 28, 135),
+	BorderDark      = Color3.fromRGB(35, 20, 55),
+	TextWhite       = Color3.fromRGB(255, 255, 255),
+	TextMuted       = Color3.fromRGB(170, 160, 195),
+	ActiveGreen     = Color3.fromRGB(52, 211, 153),
+	ActiveButtonBg  = Color3.fromRGB(48, 20, 78),
+}
 
-local card = Instance.new("Frame", gui)
-card.Size = UDim2.fromOffset(152, 56)
-card.Position = UDim2.new(0.02, 0, 0.14, 0)
-card.BackgroundColor3 = Color3.fromRGB(16, 16, 20); card.BackgroundTransparency = 0.05
-Instance.new("UICorner", card).CornerRadius = UDim.new(0, 9)
-local stroke = Instance.new("UIStroke", card); stroke.Color = Color3.fromRGB(228, 42, 54); stroke.Thickness = 1.4
+local TOGGLE_KEY = Enum.KeyCode.P
+local BoostActive = true
 
-local title = Instance.new("TextLabel", card)
-title.Size = UDim2.new(1, -22, 0, 18); title.Position = UDim2.fromOffset(7, 4)
-title.BackgroundTransparency = 1; title.Text = "⚡ ANTI-LAG // FPS"
-title.Font = Enum.Font.GothamBlack; title.TextSize = 9; title.TextColor3 = Color3.fromRGB(228, 42, 54)
-title.TextXAlignment = Enum.TextXAlignment.Left
-
-local led = Instance.new("Frame", card)
-led.Size = UDim2.fromOffset(7, 7); led.Position = UDim2.new(1, -14, 0, 9)
-led.BackgroundColor3 = Color3.fromRGB(228, 42, 54)
-Instance.new("UICorner", led).CornerRadius = UDim.new(0, 4)
-
-local state = false
-local btn = Instance.new("TextButton", card)
-btn.Size = UDim2.new(0.62, 0, 0, 22); btn.Position = UDim2.fromOffset(7, 26)
-btn.BackgroundColor3 = Color3.fromRGB(26, 26, 33); btn.Text = "OFF"
-btn.Font = Enum.Font.GothamBold; btn.TextSize = 10; btn.TextColor3 = Color3.fromRGB(165, 165, 180)
-btn.AutoButtonColor = false
-Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
-local bStroke = Instance.new("UIStroke", btn); bStroke.Color = Color3.fromRGB(130, 26, 34); bStroke.Thickness = 1.1
-
-local key = Instance.new("TextButton", card)
-key.Size = UDim2.new(0.26, 0, 0, 22); key.Position = UDim2.new(0.69, 0, 0, 26)
-key.BackgroundColor3 = Color3.fromRGB(26, 26, 33); key.Text = "[P]"
-key.Font = Enum.Font.GothamBold; key.TextSize = 10; key.TextColor3 = Color3.fromRGB(245, 245, 250)
-Instance.new("UICorner", key).CornerRadius = UDim.new(0, 6)
-
-local function toggle()
-	state = not state
-	btn.Text = state and "ON" or "OFF"
-	btn.BackgroundColor3 = state and Color3.fromRGB(18, 48, 34) or Color3.fromRGB(26, 26, 33)
-	btn.TextColor3 = state and Color3.fromRGB(46, 213, 115) or Color3.fromRGB(165, 165, 180)
-	bStroke.Color = state and Color3.fromRGB(46, 213, 115) or Color3.fromRGB(130, 26, 34)
-	led.BackgroundColor3 = state and Color3.fromRGB(46, 213, 115) or Color3.fromRGB(228, 42, 54)
+-- ============================================================================
+-- SAFE GUI RESOLVER
+-- ============================================================================
+local function getGuiContainer(): Instance
+	local success, core = pcall(function()
+		return game:GetService("CoreGui")
+	end)
+	if success and core then
+		local canWrite = pcall(function()
+			local test = Instance.new("Folder")
+			test.Parent = core
+			test:Destroy()
+		end)
+		if canWrite then
+			return core
+		end
+	end
+	return LocalPlayer:WaitForChild("PlayerGui")
 end
 
-btn.MouseButton1Click:Connect(toggle); key.MouseButton1Click:Connect(toggle)
-UserInputService.InputBegan:Connect(function(i, gp) if not gp and i.KeyCode == Enum.KeyCode.P then toggle() end end)
+local guiContainer = getGuiContainer()
+local existing = guiContainer:FindFirstChild("CipherAntiLagUI")
+if existing then
+	existing:Destroy()
+end
+
+-- ============================================================================
+-- COSMIC LIQUID UI & MOBILE SCALING
+-- ============================================================================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "CipherAntiLagUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.Parent = guiContainer
+
+local MainCard = Instance.new("Frame")
+MainCard.Name = "MainCard"
+MainCard.Size = UDim2.fromOffset(230, 64)
+MainCard.Position = UDim2.new(0.03, 0, 0.65, 0)
+MainCard.BackgroundColor3 = THEME.PanelBg
+MainCard.BackgroundTransparency = 0.05
+MainCard.BorderSizePixel = 0
+MainCard.Active = true
+MainCard.Parent = ScreenGui
+
+-- Mobile Scaler
+local CardScale = Instance.new("UIScale")
+CardScale.Parent = MainCard
+
+local function updateMobileScaling()
+	local cam = Workspace.CurrentCamera
+	local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
+	if vp.X < 650 or vp.Y < 480 then
+		local s = math.clamp(math.min(vp.X / 580, vp.Y / 420), 0.70, 0.95)
+		CardScale.Scale = s
+	else
+		CardScale.Scale = 1.0
+	end
+end
+updateMobileScaling()
+if Workspace.CurrentCamera then
+	Workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateMobileScaling)
+end
+
+local CardCorner = Instance.new("UICorner")
+CardCorner.CornerRadius = UDim.new(0, 9)
+CardCorner.Parent = MainCard
+
+local CardStroke = Instance.new("UIStroke")
+CardStroke.Thickness = 1.5
+CardStroke.Color = THEME.AccentPurple
+CardStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+CardStroke.Parent = MainCard
+
+-- Cosmic Liquid Animated Gradient for Border
+local BorderGradient = Instance.new("UIGradient")
+BorderGradient.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0.00, THEME.AccentPurple),
+	ColorSequenceKeypoint.new(0.25, THEME.VoidBg),
+	ColorSequenceKeypoint.new(0.50, THEME.AccentLight),
+	ColorSequenceKeypoint.new(0.75, THEME.AccentDeep),
+	ColorSequenceKeypoint.new(1.00, THEME.AccentPurple),
+})
+BorderGradient.Parent = CardStroke
+
+-- Header
+local Header = Instance.new("Frame")
+Header.Name = "Header"
+Header.Size = UDim2.new(1, 0, 0, 22)
+Header.BackgroundColor3 = THEME.CardBg
+Header.BorderSizePixel = 0
+Header.Parent = MainCard
+
+local HeaderCorner = Instance.new("UICorner")
+HeaderCorner.CornerRadius = UDim.new(0, 9)
+HeaderCorner.Parent = Header
+
+local HeaderTitle = Instance.new("TextLabel")
+HeaderTitle.Size = UDim2.new(1, -24, 1, 0)
+HeaderTitle.Position = UDim2.new(0, 8, 0, 0)
+HeaderTitle.BackgroundTransparency = 1
+HeaderTitle.Font = Enum.Font.GothamBold
+HeaderTitle.TextSize = 10
+HeaderTitle.TextColor3 = THEME.TextWhite
+HeaderTitle.TextXAlignment = Enum.TextXAlignment.Left
+HeaderTitle.Text = "⚡ ANTI-LAG // FPS BOOSTER [P]"
+HeaderTitle.Parent = Header
+
+-- Cosmic Liquid Flow on Text
+local TitleGradient = Instance.new("UIGradient")
+TitleGradient.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0.00, THEME.TextWhite),
+	ColorSequenceKeypoint.new(0.35, THEME.AccentLight),
+	ColorSequenceKeypoint.new(0.70, THEME.AccentPurple),
+	ColorSequenceKeypoint.new(1.00, THEME.TextWhite),
+})
+TitleGradient.Parent = HeaderTitle
+
+-- Animated Flow Loop
+RunService.RenderStepped:Connect(function(dt: number)
+	BorderGradient.Rotation = (BorderGradient.Rotation + dt * 50) % 360
+	TitleGradient.Rotation = (TitleGradient.Rotation + dt * 35) % 360
+end)
+
+local StatusDot = Instance.new("Frame")
+StatusDot.Size = UDim2.fromOffset(7, 7)
+StatusDot.Position = UDim2.new(1, -14, 0.5, -3)
+StatusDot.BackgroundColor3 = THEME.ActiveGreen
+StatusDot.BorderSizePixel = 0
+StatusDot.Parent = Header
+
+local DotCorner = Instance.new("UICorner")
+DotCorner.CornerRadius = UDim.new(1, 0)
+DotCorner.Parent = StatusDot
+
+-- Interactive Toggle Button
+local ToggleButton = Instance.new("TextButton")
+ToggleButton.Name = "ToggleButton"
+ToggleButton.Size = UDim2.new(1, -14, 0, 28)
+ToggleButton.Position = UDim2.new(0, 7, 0, 27)
+ToggleButton.BackgroundColor3 = THEME.CardBg
+ToggleButton.Font = Enum.Font.GothamBold
+ToggleButton.TextSize = 11
+ToggleButton.TextColor3 = THEME.ActiveGreen
+ToggleButton.Text = "FPS BOOST: ACTIVE"
+ToggleButton.AutoButtonColor = false
+ToggleButton.Parent = MainCard
+
+local BtnCorner = Instance.new("UICorner")
+BtnCorner.CornerRadius = UDim.new(0, 6)
+BtnCorner.Parent = ToggleButton
+
+local BtnStroke = Instance.new("UIStroke")
+BtnStroke.Thickness = 1
+BtnStroke.Color = THEME.BorderDark
+BtnStroke.Parent = ToggleButton
+
+-- Universal Smooth Draggable Function
+local function setupDraggable(targetFrame: Frame, dragAnchor: Frame)
+	local dragging = false
+	local dragStartPos = Vector2.zero
+	local frameStartPos = UDim2.new()
+
+	dragAnchor.InputBegan:Connect(function(input: InputObject)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			dragStartPos = Vector2.new(input.Position.X, input.Position.Y)
+			frameStartPos = targetFrame.Position
+		end
+	end)
+
+	UserInputService.InputChanged:Connect(function(input: InputObject)
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+			local delta = Vector2.new(input.Position.X, input.Position.Y) - dragStartPos
+			targetFrame.Position = UDim2.new(
+				frameStartPos.X.Scale,
+				frameStartPos.X.Offset + delta.X,
+				frameStartPos.Y.Scale,
+				frameStartPos.Y.Offset + delta.Y
+			)
+		end
+	end)
+
+	UserInputService.InputEnded:Connect(function(input: InputObject)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = false
+		end
+	end)
+end
+
+setupDraggable(MainCard, Header)
+
+-- Button Hover Animations
+ToggleButton.MouseEnter:Connect(function()
+	TweenService:Create(ToggleButton, TweenInfo.new(0.12), {BackgroundColor3 = THEME.CardHover}):Play()
+end)
+ToggleButton.MouseLeave:Connect(function()
+	TweenService:Create(ToggleButton, TweenInfo.new(0.12), {BackgroundColor3 = THEME.CardBg}):Play()
+end)
+
+local function updateUI()
+	if BoostActive then
+		ToggleButton.Text = "FPS BOOST: ACTIVE"
+		ToggleButton.TextColor3 = THEME.ActiveGreen
+		StatusDot.BackgroundColor3 = THEME.ActiveGreen
+		BtnStroke.Color = THEME.AccentPurple
+	else
+		ToggleButton.Text = "FPS BOOST: OFF [P]"
+		ToggleButton.TextColor3 = THEME.TextMuted
+		StatusDot.BackgroundColor3 = THEME.BorderDark
+		BtnStroke.Color = THEME.BorderDark
+	end
+end
+
+-- ============================================================================
+-- STATE BACKUP & RESTORATION ENGINE
+-- ============================================================================
+type OriginalPartData = {
+	Material: Enum.Material,
+	Reflectance: number,
+	CastShadow: boolean,
+}
+
+local originalLighting = {
+	GlobalShadows = Lighting.GlobalShadows,
+	FogEnd = Lighting.FogEnd,
+	FogStart = Lighting.FogStart,
+	Brightness = Lighting.Brightness,
+	ExposureCompensation = Lighting.ExposureCompensation,
+}
+
+local originalTerrain = Terrain and {
+	WaterWaveSize = Terrain.WaterWaveSize,
+	WaterWaveSpeed = Terrain.WaterWaveSpeed,
+	WaterReflectance = Terrain.WaterReflectance,
+	WaterTransparency = Terrain.WaterTransparency,
+} or nil
+
+local originalPartProps: { [BasePart]: OriginalPartData } = {}
+local disabledEffects: { [Instance]: boolean } = {}
+local hiddenDecals: { [Decal]: number } = {}
+
+-- ============================================================================
+-- HIGH-PERFORMANCE OPTIMIZATION ENGINE
+-- ============================================================================
+local function optimizeLighting()
+	pcall(function()
+		Lighting.GlobalShadows = false
+		Lighting.FogEnd = 9e9
+		Lighting.FogStart = 9e9
+		Lighting.Brightness = 1
+		Lighting.ExposureCompensation = 0
+
+		for _, v in ipairs(Lighting:GetChildren()) do
+			if v:IsA("PostEffect") and v.Enabled then
+				disabledEffects[v] = true
+				v.Enabled = false
+			end
+		end
+	end)
+
+	pcall(function()
+		if Terrain then
+			Terrain.WaterWaveSize = 0
+			Terrain.WaterWaveSpeed = 0
+			Terrain.WaterReflectance = 0
+			Terrain.WaterTransparency = 1
+		end
+	end)
+
+	pcall(function()
+		if typeof(settings) == "function" then
+			settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+		end
+	end)
+end
+
+local function restoreLighting()
+	pcall(function()
+		Lighting.GlobalShadows = originalLighting.GlobalShadows
+		Lighting.FogEnd = originalLighting.FogEnd
+		Lighting.FogStart = originalLighting.FogStart
+		Lighting.Brightness = originalLighting.Brightness
+		Lighting.ExposureCompensation = originalLighting.ExposureCompensation
+
+		for effect, wasEnabled in pairs(disabledEffects) do
+			if effect and effect.Parent and wasEnabled then
+				(effect :: PostEffect).Enabled = true
+			end
+		end
+		table.clear(disabledEffects)
+	end)
+
+	pcall(function()
+		if Terrain and originalTerrain then
+			Terrain.WaterWaveSize = originalTerrain.WaterWaveSize
+			Terrain.WaterWaveSpeed = originalTerrain.WaterWaveSpeed
+			Terrain.WaterReflectance = originalTerrain.WaterReflectance
+			Terrain.WaterTransparency = originalTerrain.WaterTransparency
+		end
+	end)
+end
+
+local function simplifyObject(obj: Instance)
+	if not BoostActive then return end
+
+	local char = LocalPlayer.Character
+	if char and obj:IsDescendantOf(char) then return end
+
+	if obj:IsA("BasePart") then
+		if not originalPartProps[obj] then
+			originalPartProps[obj] = {
+				Material = obj.Material,
+				Reflectance = obj.Reflectance,
+				CastShadow = obj.CastShadow,
+			}
+		end
+		obj.Material = Enum.Material.Plastic
+		obj.Reflectance = 0
+		obj.CastShadow = false
+	elseif obj:IsA("Decal") or obj:IsA("Texture") then
+		if not hiddenDecals[obj] then
+			hiddenDecals[obj] = obj.Transparency
+		end
+		obj.Transparency = 1
+	elseif obj:IsA("ParticleEmitter")
+		or obj:IsA("Trail")
+		or obj:IsA("Smoke")
+		or obj:IsA("Fire")
+		or obj:IsA("Sparkles") then
+		if obj.Enabled then
+			disabledEffects[obj] = true
+			obj.Enabled = false
+		end
+	elseif obj:IsA("Highlight") or obj:IsA("Beam") then
+		obj.Enabled = false
+	end
+end
+
+local function restoreObjects()
+	for part, props in pairs(originalPartProps) do
+		if part and part.Parent then
+			part.Material = props.Material
+			part.Reflectance = props.Reflectance
+			part.CastShadow = props.CastShadow
+		end
+	end
+	table.clear(originalPartProps)
+
+	for decal, originalTrans in pairs(hiddenDecals) do
+		if decal and decal.Parent then
+			decal.Transparency = originalTrans
+		end
+	end
+	table.clear(hiddenDecals)
+
+	for effect in pairs(disabledEffects) do
+		if effect and effect.Parent then
+			pcall(function()
+				(effect :: any).Enabled = true
+			end)
+		end
+	end
+	table.clear(disabledEffects)
+end
+
+local function runBatchOptimization()
+	optimizeLighting()
+	local descendants = Workspace:GetDescendants()
+	for i = 1, #descendants do
+		simplifyObject(descendants[i])
+	end
+end
+
+local descendantConnection: RBXScriptConnection? = nil
+
+local function enableBoost()
+	BoostActive = true
+	runBatchOptimization()
+	if not descendantConnection then
+		descendantConnection = Workspace.DescendantAdded:Connect(function(inst: Instance)
+			if BoostActive then
+				simplifyObject(inst)
+			end
+		end)
+	end
+	updateUI()
+end
+
+local function disableBoost()
+	BoostActive = false
+	if descendantConnection then
+		descendantConnection:Disconnect()
+		descendantConnection = nil
+	end
+	restoreLighting()
+	restoreObjects()
+	updateUI()
+end
+
+local function toggleBoost()
+	if BoostActive then
+		disableBoost()
+	else
+		enableBoost()
+	end
+end
+
+ToggleButton.MouseButton1Click:Connect(toggleBoost)
+
+UserInputService.InputBegan:Connect(function(input: InputObject, gpe: boolean)
+	if gpe then return end
+	if input.KeyCode == TOGGLE_KEY then
+		toggleBoost()
+	end
+end)
+
+enableBoost()
+print("⚡ [Anti-Lag] CIPHER // V6.0 Cosmic Eternal Loaded.")
