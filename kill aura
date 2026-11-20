@@ -1,53 +1,238 @@
-local CoreGui = game:GetService("CoreGui")
+-- ============================================================================
+-- CIPHER // KILL AURA V8.0 (PURE TOUCH REPLICATION ENGINE)
+-- Dedicated Melee Touch Helper: Zero Remote Overhead // Pure Physics Replication
+-- Targets Head, Torso, & HumanoidRootPart ONLY for Maximum Hit Registration
+-- ============================================================================
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local parentGui = (gethui and gethui()) or CoreGui
 
-if parentGui:FindFirstChild("UI_KillAura") then parentGui.UI_KillAura:Destroy() end
+local LocalPlayer = Players.LocalPlayer or Players:GetPropertyChangedSignal("LocalPlayer"):Wait()
 
-local gui = Instance.new("ScreenGui")
-gui.Name = "UI_KillAura"; gui.IgnoreGuiInset = true; gui.ResetOnSpawn = false; gui.Parent = parentGui
+-- Executor API Resolver
+local fireTouch: ((BasePart, BasePart, number) -> ())? = (firetouchinterest :: any)
+	or (getgenv and (getgenv().firetouchinterest or getgenv().fire_touch_interest))
+	or (syn and syn.firetouchinterest)
 
-local card = Instance.new("Frame", gui)
-card.Size = UDim2.fromOffset(152, 56)
-card.Position = UDim2.new(0.98, -152, 0.14, 0)
-card.BackgroundColor3 = Color3.fromRGB(16, 16, 20); card.BackgroundTransparency = 0.05
-Instance.new("UICorner", card).CornerRadius = UDim.new(0, 9)
-local stroke = Instance.new("UIStroke", card); stroke.Color = Color3.fromRGB(228, 42, 54); stroke.Thickness = 1.4
+-- Global State & Configuration
+_G.KillAuraEnabled = true
+local RANGE: number       = 22     -- 22-stud full combat perimeter
+local RANGE_SQ: number    = RANGE * RANGE
+local TOUCH_BURST: number = 2      -- Clean double-tap per vital part
 
-local title = Instance.new("TextLabel", card)
-title.Size = UDim2.new(1, -22, 0, 18); title.Position = UDim2.fromOffset(7, 4)
-title.BackgroundTransparency = 1; title.Text = "⚡ KILL AURA 360°"
-title.Font = Enum.Font.GothamBlack; title.TextSize = 9; title.TextColor3 = Color3.fromRGB(228, 42, 54)
-title.TextXAlignment = Enum.TextXAlignment.Left
+-- In-Range Target Store (Tracks players currently inside our perimeter)
+type TargetEntry = {
+	Player: Player,
+	Character: Model,
+	HitParts: { BasePart },
+	Root: BasePart,
+}
 
-local led = Instance.new("Frame", card)
-led.Size = UDim2.fromOffset(7, 7); led.Position = UDim2.new(1, -14, 0, 9)
-led.BackgroundColor3 = Color3.fromRGB(228, 42, 54)
-Instance.new("UICorner", led).CornerRadius = UDim.new(0, 4)
+local inRangeTargets: { [Player]: TargetEntry } = {}
+local toolHandles: { BasePart } = {}
+local equippedTools: { Tool } = {}
+local toolConnections: { [Tool]: RBXScriptConnection } = {}
 
-local state = false
-local btn = Instance.new("TextButton", card)
-btn.Size = UDim2.new(0.62, 0, 0, 22); btn.Position = UDim2.fromOffset(7, 26)
-btn.BackgroundColor3 = Color3.fromRGB(26, 26, 33); btn.Text = "OFF"
-btn.Font = Enum.Font.GothamBold; btn.TextSize = 10; btn.TextColor3 = Color3.fromRGB(165, 165, 180)
-btn.AutoButtonColor = false
-Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
-local bStroke = Instance.new("UIStroke", btn); bStroke.Color = Color3.fromRGB(130, 26, 34); bStroke.Thickness = 1.1
+-- Priority parts strictly limited to vital hit zones (Torso, Head, and Root)
+local VITAL_PART_NAMES = {
+	"Torso",
+	"UpperTorso",
+	"LowerTorso",
+	"Head",
+	"HumanoidRootPart",
+}
 
-local key = Instance.new("TextButton", card)
-key.Size = UDim2.new(0.26, 0, 0, 22); key.Position = UDim2.new(0.69, 0, 0, 26)
-key.BackgroundColor3 = Color3.fromRGB(26, 26, 33); key.Text = "[K]"
-key.Font = Enum.Font.GothamBold; key.TextSize = 10; key.TextColor3 = Color3.fromRGB(245, 245, 250)
-Instance.new("UICorner", key).CornerRadius = UDim.new(0, 6)
+-- Destroy any previous UI if left over
+pcall(function()
+	local core = game:GetService("CoreGui"):FindFirstChild("CipherKillAuraUI")
+	if core then core:Destroy() end
+	local pgui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+	if pgui then
+		local u = pgui:FindFirstChild("CipherKillAuraUI")
+		if u then u:Destroy() end
+	end
+end)
 
-local function toggle()
-	state = not state
-	btn.Text = state and "ON" or "OFF"
-	btn.BackgroundColor3 = state and Color3.fromRGB(18, 48, 34) or Color3.fromRGB(26, 26, 33)
-	btn.TextColor3 = state and Color3.fromRGB(46, 213, 115) or Color3.fromRGB(165, 165, 180)
-	bStroke.Color = state and Color3.fromRGB(46, 213, 115) or Color3.fromRGB(130, 26, 34)
-	led.BackgroundColor3 = state and Color3.fromRGB(46, 213, 115) or Color3.fromRGB(228, 42, 54)
+-- ============================================================================
+-- IN-RANGE PLAYER AUDITOR
+-- ============================================================================
+local function refreshInRangeStore()
+	table.clear(inRangeTargets)
+
+	local char = LocalPlayer.Character
+	if not char then return end
+
+	local myRoot = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
+	if not (myRoot and myRoot:IsA("BasePart")) then return end
+
+	local myPos = myRoot.Position
+
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= LocalPlayer then
+			local pChar = p.Character
+			if pChar then
+				local hum = pChar:FindFirstChildOfClass("Humanoid")
+				local enemyRoot = pChar:FindFirstChild("HumanoidRootPart") or pChar:FindFirstChild("Torso")
+				if hum and enemyRoot and enemyRoot:IsA("BasePart") and hum.Health > 0 then
+					local dx = enemyRoot.Position.X - myPos.X
+					local dy = enemyRoot.Position.Y - myPos.Y
+					local dz = enemyRoot.Position.Z - myPos.Z
+					if (dx * dx + dy * dy + dz * dz) <= RANGE_SQ then
+						-- Extract ONLY Head, Torso, and Root parts
+						local vitalParts: { BasePart } = {}
+						for _, partName in ipairs(VITAL_PART_NAMES) do
+							local bp = pChar:FindFirstChild(partName)
+							if bp and bp:IsA("BasePart") and not table.find(vitalParts, bp) then
+								table.insert(vitalParts, bp)
+							end
+						end
+
+						inRangeTargets[p] = {
+							Player = p,
+							Character = pChar,
+							HitParts = vitalParts,
+							Root = enemyRoot,
+						}
+					end
+				end
+			end
+		end
+	end
 end
 
-btn.MouseButton1Click:Connect(toggle); key.MouseButton1Click:Connect(toggle)
-UserInputService.InputBegan:Connect(function(i, gp) if not gp and i.KeyCode == Enum.KeyCode.K then toggle() end end)
+-- ============================================================================
+-- PURE TOUCH REPLICATION (NO REMOTES - STRICT TOUCH HELPER)
+-- ============================================================================
+local function replicateTouches()
+	if not _G.KillAuraEnabled or not fireTouch then return end
+	if #toolHandles == 0 then return end
+
+	for _, target in pairs(inRangeTargets) do
+		local parts = target.HitParts
+		for p = 1, #parts do
+			local enemyPart = parts[p]
+			if enemyPart and enemyPart.Parent then
+				for t = 1, #toolHandles do
+					local toolHandle = toolHandles[t]
+					if toolHandle and toolHandle.Parent then
+						for _ = 1, TOUCH_BURST do
+							pcall(fireTouch, toolHandle, enemyPart, 0)
+							pcall(fireTouch, toolHandle, enemyPart, 1)
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+-- ============================================================================
+-- TOOL CACHING & SWING HOOKING
+-- ============================================================================
+local function hookToolAttack(tool: Tool)
+	if toolConnections[tool] then
+		toolConnections[tool]:Disconnect()
+		toolConnections[tool] = nil
+	end
+
+	-- Instant touch burst whenever tool activates/swings
+	toolConnections[tool] = tool.Activated:Connect(function()
+		refreshInRangeStore()
+		replicateTouches()
+	end)
+end
+
+local function rebuildToolHandles()
+	table.clear(toolHandles)
+	table.clear(equippedTools)
+
+	local char = LocalPlayer.Character
+	if not char then return end
+
+	for _, t in ipairs(char:GetChildren()) do
+		if t:IsA("Tool") then
+			table.insert(equippedTools, t)
+			hookToolAttack(t)
+
+			local handle = t:FindFirstChild("Handle") or t:FindFirstChildWhichIsA("BasePart")
+			if handle and handle:IsA("BasePart") then
+				handle.CanCollide = false
+				handle.Massless = true
+				handle.CanTouch = true
+				if not table.find(toolHandles, handle) then
+					table.insert(toolHandles, handle)
+				end
+			end
+		end
+	end
+end
+
+-- Screen tap / mouse click fallback trigger
+UserInputService.InputBegan:Connect(function(input: InputObject, gpe: boolean)
+	if gpe then return end
+	if input.UserInputType == Enum.UserInputType.MouseButton1
+		or input.UserInputType == Enum.UserInputType.Touch
+		or input.KeyCode == Enum.KeyCode.ButtonR2 then
+		if #equippedTools > 0 and _G.KillAuraEnabled then
+			refreshInRangeStore()
+			replicateTouches()
+		end
+	end
+end)
+
+-- Continuous Proximity Touch Watchdog (15 Hz)
+-- Replicates touches smoothly to all stored in-range players without remote overhead
+local lastTouchTick = 0
+RunService.Heartbeat:Connect(function()
+	if not _G.KillAuraEnabled then return end
+	local now = os.clock()
+	if now - lastTouchTick < 0.065 then return end
+	lastTouchTick = now
+
+	refreshInRangeStore()
+	replicateTouches()
+end)
+
+local function hookCharacter(char: Model)
+	for _, conn in pairs(toolConnections) do
+		conn:Disconnect()
+	end
+	table.clear(toolConnections)
+
+	rebuildToolHandles()
+	char.ChildAdded:Connect(function(child: Instance)
+		if child:IsA("Tool") then
+			rebuildToolHandles()
+			-- Frame-0 Instant Touch Burst upon Equip / Respawn
+			task.defer(function()
+				if _G.KillAuraEnabled then
+					refreshInRangeStore()
+					replicateTouches()
+				end
+			end)
+		end
+	end)
+	char.ChildRemoved:Connect(function(child: Instance)
+		if child:IsA("Tool") then
+			task.defer(rebuildToolHandles)
+		end
+	end)
+	if #equippedTools > 0 and _G.KillAuraEnabled then
+		task.defer(function()
+			refreshInRangeStore()
+			replicateTouches()
+		end)
+	end
+end
+
+if LocalPlayer.Character then
+	hookCharacter(LocalPlayer.Character)
+end
+LocalPlayer.CharacterAdded:Connect(hookCharacter)
+
+Players.PlayerRemoving:Connect(function(p)
+	inRangeTargets[p] = nil
+end)
+
+print("⚡ [Kill Aura] CIPHER // V8.0 Pure Touch Loaded (Head & Torso Focused, Zero Remotes).")
