@@ -1,646 +1,1429 @@
---====================================================================================================--
---        UNIFIED LUAU SECURE TERMINAL (WHITELIST MATRIX & AUTOBAN RADAR ENGINE)                     --
---====================================================================================================--
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
 
-local SecurityEngine = {}
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
 
--- ----------------------------------------------------------------------------------------------------
--- SECTION 1: WHITELIST STORAGE & INTERNAL DATABASE
--- ----------------------------------------------------------------------------------------------------
-local DATABASE = {
-    OwnerUsername = "TheyFw_maaa", -- Master admin permission flag
-    
-    -- ADD AUTHORIZED USERS HERE: Put the exact Roblox usernames inside quotes
-    AllowedUsernames = {
-        "Blixxrrr",
-        "TrustedDeveloper",
-        "TesterAccount"
-    },
-    
-    -- INTERNAL BLACKLIST: Automatically registers intruders who try to steal your script
-    BannedHardwareIDs = {},
-    BannedUserIds = {}
+local ASSETS = {
+	HubBackground = "rbxassetid://0",
+	CornerMascot  = "rbxassetid://0",
 }
 
--- Cache global core components
-local Players = game:GetService("Players")
-local CoreGui = game:GetService("CoreGui")
-local HttpService = game:GetService("HttpService")
-local LocalPlayer = Players.LocalPlayer
+-- ==========================================
+-- DYNAMIC THEME STATE (Live-Customizable!)
+-- ==========================================
+local THEME = {
+	BgDark    = Color3.fromRGB(10, 12, 20),
+	PanelBg   = Color3.fromRGB(16, 20, 32),
+	RowBg     = Color3.fromRGB(22, 27, 44),
+	Primary   = Color3.fromRGB(255, 35, 75),   -- Default Crimson Red
+	Secondary = Color3.fromRGB(30, 175, 255),  -- Default Azure Blue
+	TextWhite = Color3.fromRGB(255, 255, 255),
+	TextMuted = Color3.fromRGB(165, 180, 210),
+	CornerRad = 10,
+	BorderThick = 2.5,
+	BgOpacity = 0.05,
+	SpinBorder = true,
+	SpinSpeed = 65,
+	RainbowMode = false,
+	ShowSparks = true,
+	SparkCount = 16,
+	SidebarRight = false,
+	CurrentFont = Enum.Font.GothamBold,
+	HeaderFont = Enum.Font.GothamBlack,
+	ShowMascot = true
+}
 
--- ----------------------------------------------------------------------------------------------------
--- SECTION 2: THE SECURITY AUDIT & REPORT ENGINE
--- ----------------------------------------------------------------------------------------------------
-local function ProcessIntruderViolation(player, reasonType)
-    local hwid = "RESTRICTED_HWID"
-    pcall(function() hwid = game:GetService("RbxAnalyticsService"):GetClientId() end)
-    
-    -- Save details into local server state memory to maintain tracking
-    table.insert(DATABASE.BannedUserIds, tostring(player.UserId))
-    table.insert(DATABASE.BannedHardwareIDs, hwid)
-    
-    -- Print a local enforcement log warning for your console view
-    warn(string.format("[SECURITY ALERT]: Blacklisting player %s for unauthorized execution!", player.Name))
-    
-    -- Optional: Connect to your private tracking webhook if you configured a Discord log link
-    -- (Sends IP, HWID, and details directly to your phone instantly)
-    
-    -- Execute immediate execution termination and ban kick rule
-    player:Kick("\n[SECURITY SYSTEM]: " .. reasonType .. "\nYour execution context has been banned from this hub by TheyFw_maaa.")
+local PRESETS = {
+	{Name = "Crimson & Azure", Pri = Color3.fromRGB(255, 35, 75),  Sec = Color3.fromRGB(30, 175, 255), Bg = Color3.fromRGB(10, 12, 20), Row = Color3.fromRGB(22, 27, 44)},
+	{Name = "Hollow Purple",   Pri = Color3.fromRGB(185, 45, 255), Sec = Color3.fromRGB(255, 50, 140), Bg = Color3.fromRGB(13, 10, 22), Row = Color3.fromRGB(26, 20, 42)},
+	{Name = "Demon Flame",     Pri = Color3.fromRGB(255, 85, 20),  Sec = Color3.fromRGB(255, 200, 35), Bg = Color3.fromRGB(18, 10, 10), Row = Color3.fromRGB(34, 20, 20)},
+	{Name = "Cyber Emerald",   Pri = Color3.fromRGB(20, 245, 140), Sec = Color3.fromRGB(25, 195, 255), Bg = Color3.fromRGB(9, 18, 16),  Row = Color3.fromRGB(18, 34, 30)},
+	{Name = "Shadow Monarch",  Pri = Color3.fromRGB(95, 115, 255), Sec = Color3.fromRGB(175, 95, 255), Bg = Color3.fromRGB(8, 9, 16),   Row = Color3.fromRGB(18, 20, 36)},
+	{Name = "Sakura Pearl",    Pri = Color3.fromRGB(255, 105, 180),Sec = Color3.fromRGB(130, 220, 255),Bg = Color3.fromRGB(20, 14, 22), Row = Color3.fromRGB(36, 26, 40)},
+	{Name = "Ultra Instinct",  Pri = Color3.fromRGB(220, 235, 255),Sec = Color3.fromRGB(90, 185, 255), Bg = Color3.fromRGB(11, 14, 22), Row = Color3.fromRGB(22, 28, 44)},
+	{Name = "Sukuna Shrine",   Pri = Color3.fromRGB(220, 15, 40),  Sec = Color3.fromRGB(255, 125, 45), Bg = Color3.fromRGB(16, 7, 9),   Row = Color3.fromRGB(32, 14, 18)},
+}
+
+local FONT_STYLES = {
+	{Name = "Modern Gotham", Bold = Enum.Font.GothamBold, Black = Enum.Font.GothamBlack},
+	{Name = "Sci-Fi Tech",   Bold = Enum.Font.SciFi,      Black = Enum.Font.SciFi},
+	{Name = "Arcade Pixel",  Bold = Enum.Font.Arcade,     Black = Enum.Font.Arcade},
+	{Name = "Fantasy Serif", Bold = Enum.Font.Antique,    Black = Enum.Font.Antique},
+	{Name = "Clean Code",    Bold = Enum.Font.Code,       Black = Enum.Font.Code},
+}
+
+-- Registries so EVERY UI element updates live
+local REG = {
+	PrimaryStrokes = {},
+	SecondaryStrokes = {},
+	PrimaryTexts = {},
+	SecondaryTexts = {},
+	RowFrames = {},
+	PanelFrames = {},
+	AllLabels = {},
+	AllHeaders = {},
+	ActiveTabName = "Home",
+	TabButtons = {},
+	Toggles = {},
+	Sliders = {},
+	Particles = {}
+}
+
+local function hexFromColor(c)
+	return string.format("#%02X%02X%02X", math.floor(c.R * 255), math.floor(c.G * 255), math.floor(c.B * 255))
 end
 
--- ----------------------------------------------------------------------------------------------------
--- SECTION 3: GRAPHICAL CONTROL PANEL (OWNER TELEMETRY VIEWER)
--- ----------------------------------------------------------------------------------------------------
-local function ConstructAdminTelemetryPanel()
-    local ScreenGui = Instance.new("ScreenGui")
-    ScreenGui.Name = "SecurityDashboard_X"
-    ScreenGui.ResetOnSpawn = false
-    
-    -- Hide inside CoreGui so normal recording or screenshot tools cannot capture it
-    local parentTarget = pcall(function() return CoreGui end) and CoreGui or LocalPlayer:WaitForChild("PlayerGui")
-    ScreenGui.Parent = parentTarget
-
-    -- 1. Floating Menu Toggle Button
-    local ToggleButton = Instance.new("TextButton")
-    ToggleButton.Size = UDim2.new(0, 110, 0, 40)
-    ToggleButton.Position = UDim2.new(0, 15, 0.4, 0)
-    ToggleButton.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-    ToggleButton.Text = "🛡️ Hub Logs"
-    ToggleButton.TextColor3 = Color3.fromRGB(255, 0, 0)
-    ToggleButton.Font = Enum.Font.SourceSansBold
-    ToggleButton.TextSize = 15
-    ToggleButton.BorderSizePixel = 2
-    ToggleButton.BorderColor3 = Color3.fromRGB(150, 0, 0)
-    ToggleButton.Parent = ScreenGui
-
-    local UICorner = Instance.new("UICorner")
-    UICorner.CornerRadius = UDim.new(0, 5)
-    UICorner.Parent = ToggleButton
-
-    -- 2. Telemetry Log Container Frame
-    local DisplayFrame = Instance.new("Frame")
-    DisplayFrame.Size = UDim2.new(0, 460, 0, 320)
-    DisplayFrame.Position = UDim2.new(0.5, -230, 0.5, -150)
-    DisplayFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
-    DisplayFrame.BorderColor3 = Color3.fromRGB(40, 40, 40)
-    DisplayFrame.Visible = false
-    DisplayFrame.Parent = ScreenGui
-
-    local TitleLabel = Instance.new("TextLabel")
-    TitleLabel.Size = UDim2.new(1, 0, 0, 35)
-    TitleLabel.BackgroundColor3 = Color3.fromRGB(255, 192, 203) -- Custom Cute Pink accent for matching
-    TitleLabel.Text = "  📡 INTRUDER RADAR LOGS (THEYFW_MAAA ADMIN PANEL)"
-    TitleLabel.TextColor3 = Color3.fromRGB(85, 65, 75)
-    TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
-    TitleLabel.Font = Enum.Font.SourceSansBold
-    TitleLabel.TextSize = 13
-    TitleLabel.Parent = DisplayFrame
-
-    local ScrollingFrame = Instance.new("ScrollingFrame")
-    ScrollingFrame.Size = UDim2.new(1, -20, 1, -55)
-    ScrollingFrame.Position = UDim2.new(0, 10, 0, 45)
-    ScrollingFrame.BackgroundTransparency = 1
-    ScrollingFrame.CanvasSize = UDim2.new(0, 0, 3, 0)
-    ScrollingFrame.ScrollBarThickness = 6
-    ScrollingFrame.Parent = DisplayFrame
-
-    local UIListLayout = Instance.new("UIListLayout")
-    UIListLayout.Padding = UDim.new(0, 5)
-    UIListLayout.Parent = ScrollingFrame
-
-    -- Populate rows showing current player tracking maps
-    local function RefreshDataStream()
-        for _, oldLine in ipairs(ScrollingFrame:GetChildren()) do
-            if oldLine:IsA("TextLabel") then oldLine:Destroy() end
-        end
-
-        for _, player in ipairs(Players:GetPlayers()) do
-            local statusLabel = "⚠️ UNAUTHORIZED ACCOUNT"
-            if player.Name == DATABASE.OwnerUsername then statusLabel = "👑 OWNER"
-            elseif table.find(DATABASE.AllowedUsernames, player.Name) then statusLabel = "✅ WHITELISTED" end
-
-            local LogLine = Instance.new("TextLabel")
-            LogLine.Size = UDim2.new(1, 0, 0, 45)
-            LogLine.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
-            LogLine.TextColor3 = Color3.fromRGB(200, 200, 200)
-            LogLine.Font = Enum.Font.Code
-            LogLine.TextSize = 12
-            LogLine.TextXAlignment = Enum.TextXAlignment.Left
-            LogLine.Text = string.format("  Player: %s | ID: %s\n  Status: %s", player.Name, tostring(player.UserId), statusLabel)
-            LogLine.Parent = ScrollingFrame
-        end
-    end
-
-    -- Toggle Button Authentication Click Event Listener
-    ToggleButton.MouseButton1Click:Connect(function()
-        if LocalPlayer.Name ~= DATABASE.OwnerUsername then
-            DisplayFrame.Visible = false
-            ScreenGui:Destroy()
-            ProcessIntruderViolation(LocalPlayer, "CRITICAL: Admin Interaction Tamper Violation")
-            return
-        end
-        DisplayFrame.Visible = not DisplayFrame.Visible
-        if DisplayFrame.Visible then RefreshDataStream() end
-    end)
+if playerGui:FindFirstChild("NexusHubAnimeUltra") then
+	playerGui.NexusHubAnimeUltra:Destroy()
 end
 
--- ----------------------------------------------------------------------------------------------------
--- SECTION 4: ENFORCEMENT VERIFICATION TUNNEL
--- ----------------------------------------------------------------------------------------------------
-function SecurityEngine.StartVerification()
-    local currentName = LocalPlayer.Name
-    local currentHwid = "UNKNOWN"
-    pcall(function() currentHwid = game:GetService("RbxAnalyticsService"):GetClientId() end)
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "NexusHubAnimeUltra"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = playerGui
 
-    if table.find(DATABASE.BannedUserIds, tostring(LocalPlayer.UserId)) or table.find(DATABASE.BannedHardwareIDs, currentHwid) then
-        LocalPlayer:Kick("Access Terminated: This execution device is permanently blacklisted from our script network.")
-        return false
-    end
+-- Compact Main Window (440 x 270)
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 440, 0, 270)
+mainFrame.Position = UDim2.new(0.5, -220, 0.5, -135)
+mainFrame.BackgroundColor3 = THEME.BgDark
+mainFrame.BackgroundTransparency = THEME.BgOpacity
+mainFrame.BorderSizePixel = 0
+mainFrame.Parent = screenGui
 
-    if currentName == DATABASE.OwnerUsername then
-        print("[AUTHENTICATOR]: Admin verified. Mounting monitoring interface tool panels...")
-        ConstructAdminTelemetryPanel()
-        return true
-    end
+local uiScale = Instance.new("UIScale")
+uiScale.Parent = mainFrame
 
-    local isAuthorized = table.find(DATABASE.AllowedUsernames, currentName)
-    if isAuthorized then
-        print("[AUTHENTICATOR]: Welcome, authorized user " .. currentName .. ". Loading system packages...")
-        return true
-    end
-
-    ProcessIntruderViolation(LocalPlayer, "Access Denied: Your account profile is not registered on the whitelist setup.")
-    return false
+local function updateAutoScale()
+	local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1280, 720)
+	if vp.X < 520 or vp.Y < 340 then
+		uiScale.Scale = math.min((vp.X - 30) / 440, (vp.Y - 30) / 270, 1)
+	else
+		uiScale.Scale = 1
+	end
+end
+updateAutoScale()
+if workspace.CurrentCamera then
+	workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateAutoScale)
 end
 
--- Execute gatekeeper handshake
-if not SecurityEngine.StartVerification() then return end
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, THEME.CornerRad)
+mainCorner.Parent = mainFrame
 
--- =============================================================================
--- MAIN INTERFACE PIPELINE LAYOUT: JAY HUB V4 — HYPER-COOL KAWAII OVERDRIVE
--- =============================================================================
-local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
-local SoundService = game:GetService("SoundService")
+local outerStroke = Instance.new("UIStroke")
+outerStroke.Thickness = THEME.BorderThick
+outerStroke.Color = Color3.new(1, 1, 1)
+outerStroke.Parent = mainFrame
 
-local TargetCanvas = pcall(function() return CoreGui end) and CoreGui or LocalPlayer:WaitForChild("PlayerGui")
+local outerGrad = Instance.new("UIGradient")
+outerGrad.Parent = outerStroke
 
-if TargetCanvas:FindFirstChild("JayCuteCleanHub") then
-    TargetCanvas.JayCuteCleanHub:Destroy()
+-- Clipped Inner FX Layer
+local fxClip = Instance.new("Frame")
+fxClip.Size = UDim2.new(1, 0, 1, 0)
+fxClip.BackgroundTransparency = 1
+fxClip.ClipsDescendants = true
+fxClip.ZIndex = 1
+fxClip.Parent = mainFrame
+
+local fxCorner = Instance.new("UICorner")
+fxCorner.CornerRadius = UDim.new(0, THEME.CornerRad)
+fxCorner.Parent = fxClip
+
+local auraBg = Instance.new("Frame")
+auraBg.Size = UDim2.new(1, 0, 1, 0)
+auraBg.BackgroundColor3 = Color3.new(1, 1, 1)
+auraBg.BackgroundTransparency = 0.86
+auraBg.BorderSizePixel = 0
+auraBg.ZIndex = 1
+auraBg.Parent = fxClip
+
+local auraGrad = Instance.new("UIGradient")
+auraGrad.Rotation = 35
+auraGrad.Parent = auraBg
+
+local animeBgImage = Instance.new("ImageLabel")
+animeBgImage.Size = UDim2.new(1, 0, 1, 0)
+animeBgImage.BackgroundTransparency = 1
+animeBgImage.Image = ASSETS.HubBackground
+animeBgImage.ImageTransparency = 0.45
+animeBgImage.ScaleType = Enum.ScaleType.Crop
+animeBgImage.ZIndex = 2
+animeBgImage.Parent = fxClip
+
+-- Floating Energy Sparks (Pool of 35 so Spark Count slider can scale them!)
+for i = 1, 35 do
+	local p = Instance.new("Frame")
+	local isPri = (i % 2 == 0)
+	local sz = math.random(3, 6)
+	p.Size = UDim2.new(0, sz, 0, sz)
+	p.Position = UDim2.new(math.random(), 0, math.random(), 0)
+	p.BackgroundColor3 = isPri and THEME.Primary or THEME.Secondary
+	p.BackgroundTransparency = math.random(30, 65) / 100
+	p.Rotation = math.random(0, 360)
+	p.BorderSizePixel = 0
+	p.Visible = (i <= THEME.SparkCount)
+	p.ZIndex = 2
+	p.Parent = fxClip
+
+	local pc = Instance.new("UICorner")
+	pc.CornerRadius = UDim.new(0, 2)
+	pc.Parent = p
+
+	table.insert(REG.Particles, {
+		idx = i,
+		obj = p,
+		isPri = isPri,
+		speedY = math.random(12, 28) / 100,
+		speedX = math.random(-8, 12) / 100,
+		rotSpeed = math.random(-90, 90)
+	})
 end
 
--- Screen Base Layout Canvas
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "JayCuteCleanHub"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.DisplayOrder = 999999
-ScreenGui.Parent = TargetCanvas
+-- Anime Mascot Overlay
+local mascotImage = Instance.new("ImageLabel")
+mascotImage.Size = UDim2.new(0, 115, 0, 150)
+mascotImage.Position = UDim2.new(1, -80, 1, -138)
+mascotImage.BackgroundTransparency = 1
+mascotImage.Image = ASSETS.CornerMascot
+mascotImage.ScaleType = Enum.ScaleType.Fit
+mascotImage.ZIndex = 12
+mascotImage.Parent = mainFrame
 
--- Main Container Frame (Marshmallow Soft Pink Glassmorphism)
-local MainFrame = Instance.new("Frame")
-MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 660, 0, 380)
-MainFrame.Position = UDim2.new(0.5, -330, 0.5, -190)
-MainFrame.BackgroundColor3 = Color3.fromRGB(254, 248, 250)
-MainFrame.BackgroundTransparency = 0.05
-MainFrame.BorderSizePixel = 0
-MainFrame.Active = true
-MainFrame.Draggable = true
-MainFrame.ZIndex = 10
-MainFrame.Parent = ScreenGui
+-- Top Bar
+local topBar = Instance.new("Frame")
+topBar.Size = UDim2.new(1, 0, 0, 34)
+topBar.BackgroundColor3 = THEME.PanelBg
+topBar.BackgroundTransparency = 0.25
+topBar.BorderSizePixel = 0
+topBar.ZIndex = 5
+topBar.Parent = mainFrame
+table.insert(REG.PanelFrames, topBar)
 
-local MainCorner = Instance.new("UICorner")
-MainCorner.CornerRadius = UDim.new(0, 18)
-MainCorner.Parent = MainFrame
+local topCorner = Instance.new("UICorner")
+topCorner.CornerRadius = UDim.new(0, THEME.CornerRad)
+topCorner.Parent = topBar
 
--- Holographic Liquid Gradient Border
-local OuterStroke = Instance.new("UIStroke")
-OuterStroke.Thickness = 2.8
-OuterStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-OuterStroke.Parent = MainFrame
+local topLine = Instance.new("Frame")
+topLine.Size = UDim2.new(1, 0, 0, 1.5)
+topLine.Position = UDim2.new(0, 0, 1, -1.5)
+topLine.BackgroundColor3 = Color3.new(1, 1, 1)
+topLine.BorderSizePixel = 0
+topLine.ZIndex = 6
+topLine.Parent = topBar
 
-local OuterGradient = Instance.new("UIGradient")
-OuterGradient.Color = ColorSequence.new({
+local topLineGrad = Instance.new("UIGradient")
+topLineGrad.Parent = topLine
 
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(0, 240, 1, 0)
+titleLabel.Position = UDim2.new(0, 12, 0, 0)
+titleLabel.BackgroundTransparency = 1
+titleLabel.RichText = true
+titleLabel.Font = THEME.HeaderFont
+titleLabel.TextSize = 15
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.ZIndex = 6
+titleLabel.Parent = topBar
+table.insert(REG.AllHeaders, titleLabel)
 
-ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 165, 185)),
-ColorSequenceKeypoint.new(0.5, Color3.fromRGB(220, 180, 255)),
-ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 165, 185))
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 22, 0, 22)
+closeBtn.Position = UDim2.new(1, -28, 0.5, -11)
+closeBtn.BackgroundColor3 = THEME.RowBg
+closeBtn.Text = "X"
+closeBtn.TextColor3 = THEME.Primary
+closeBtn.Font = THEME.HeaderFont
+closeBtn.TextSize = 11
+closeBtn.ZIndex = 6
+closeBtn.Parent = topBar
+table.insert(REG.RowFrames, closeBtn)
+table.insert(REG.PrimaryTexts, closeBtn)
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 5)
+closeCorner.Parent = closeBtn
+
+local closeStroke = Instance.new("UIStroke")
+closeStroke.Thickness = 1
+closeStroke.Color = THEME.Primary
+closeStroke.Parent = closeBtn
+table.insert(REG.PrimaryStrokes, closeStroke)
+
+-- Floating Reopen Pill
+local reopenBtn = Instance.new("TextButton")
+reopenBtn.Size = UDim2.new(0, 96, 0, 28)
+reopenBtn.Position = UDim2.new(0.5, -48, 0, 10)
+reopenBtn.BackgroundColor3 = THEME.BgDark
+reopenBtn.RichText = true
+reopenBtn.Font = THEME.HeaderFont
+reopenBtn.TextSize = 12
+reopenBtn.Visible = false
+reopenBtn.ZIndex = 20
+reopenBtn.Parent = screenGui
+
+local reopenCorner = Instance.new("UICorner")
+reopenCorner.CornerRadius = UDim.new(0, 8)
+reopenCorner.Parent = reopenBtn
+
+local reopenStroke = Instance.new("UIStroke")
+reopenStroke.Thickness = 1.5
+reopenStroke.Color = THEME.Secondary
+reopenStroke.Parent = reopenBtn
+
+local function toggleHub(show)
+	mainFrame.Visible = show
+	reopenBtn.Visible = not show
+end
+
+closeBtn.MouseButton1Click:Connect(function() toggleHub(false) end)
+reopenBtn.MouseButton1Click:Connect(function() toggleHub(true) end)
+UserInputService.InputBegan:Connect(function(input, gp)
+	if not gp and input.KeyCode == Enum.KeyCode.RightControl then
+		toggleHub(not mainFrame.Visible)
+	end
+end)
+
+-- Dragging
+local dragging, dragInput, dragStart, startPos
+topBar.InputBegan:Connect(function(input)
+if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+dragging = true
+dragStart = input.Position
+startPos = mainFrame.Position
+input.Changed:Connect(function()
+if input.UserInputState == Enum.UserInputState.End then dragging = false end
+end)
+end
+end)
+topBar.InputChanged:Connect(function(input)
+if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+dragInput = input
+end
+end)
+UserInputService.InputChanged:Connect(function(input)
+if input == dragInput and dragging then
+local delta = input.Position - dragStart
+mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+end
+end)
+-- ==========================================
+-- LEFT SIDEBAR
+-- ==========================================
+local sidebar = Instance.new("ScrollingFrame")
+sidebar.Name = "Sidebar"
+sidebar.Size = UDim2.new(0, 56, 1, -40)
+sidebar.Position = UDim2.new(0, 6, 0, 36)
+sidebar.BackgroundColor3 = THEME.PanelBg
+sidebar.BackgroundTransparency = 0.25
+sidebar.BorderSizePixel = 0
+sidebar.ScrollBarThickness = 0
+sidebar.CanvasSize = UDim2.new(0, 0, 0, 0)
+sidebar.AutomaticCanvasSize = Enum.AutomaticSize.Y
+sidebar.ZIndex = 6
+sidebar.Parent = mainFrame
+table.insert(REG.PanelFrames, sidebar)
+local sideCorner = Instance.new("UICorner")
+sideCorner.CornerRadius = UDim.new(0, 8)
+sideCorner.Parent = sidebar
+local sideBorder = Instance.new("UIStroke")
+sideBorder.Thickness = 1
+sideBorder.Color = THEME.Primary
+sideBorder.Transparency = 0.45
+sideBorder.Parent = sidebar
+table.insert(REG.PrimaryStrokes, sideBorder)
+local sidePad = Instance.new("UIPadding")
+sidePad.PaddingTop = UDim.new(0, 5)
+sidePad.PaddingBottom = UDim.new(0, 5)
+sidePad.Parent = sidebar
+local sideLayout = Instance.new("UIListLayout")
+sideLayout.Padding = UDim.new(0, 5)
+sideLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+sideLayout.Parent = sidebar
+-- Content Area
+local contentArea = Instance.new("Frame")
+contentArea.Name = "ContentArea"
+contentArea.Size = UDim2.new(1, -74, 1, -42)
+contentArea.Position = UDim2.new(0, 68, 0, 36)
+contentArea.BackgroundTransparency = 1
+contentArea.ZIndex = 6
+contentArea.Parent = mainFrame
+-- ==========================================
+-- LIVE THEME & LAYOUT ENGINE
+-- ==========================================
+local function applyTheme()
+mainFrame.BackgroundColor3 = THEME.BgDark
+mainFrame.BackgroundTransparency = THEME.BgOpacity
+reopenBtn.BackgroundColor3 = THEME.BgDark
+mascotImage.Visible = THEME.ShowMascot
+mainCorner.CornerRadius = UDim.new(0, THEME.CornerRad)
+fxCorner.CornerRadius = UDim.new(0, THEME.CornerRad)
+topCorner.CornerRadius = UDim.new(0, THEME.CornerRad)
+outerStroke.Thickness = THEME.BorderThick
+outerGrad.Color = ColorSequence.new({
+ColorSequenceKeypoint.new(0, THEME.Primary),
+ColorSequenceKeypoint.new(0.5, THEME.Secondary),
+ColorSequenceKeypoint.new(1, THEME.Primary)
 })
-OuterGradient.Parent = OuterStroke
-local BorderRotation = 0
-RunService.RenderStepped:Connect(function(deltaTime)
-BorderRotation = (BorderRotation + (deltaTime * 50)) % 360
-OuterGradient.Rotation = BorderRotation
-end)
-local function PlayCosmicChime(isTabChange)
-local Chime = Instance.new("Sound")
-Chime.SoundId = isTabChange and "rbxassetid://9114222304" or "rbxassetid://5400710531"
-Chime.Volume = 0.35
-Chime.Parent = SoundService
-Chime:Play()
-game:GetService("Debris"):AddItem(Chime, 1)
-end
--- Spawns premium floating stars upon activation
-local function SpawnCuteStarburst()
-for i = 1, 12 do
-local Star = Instance.new("TextLabel")
-Star.Text = math.random(1, 2) == 1 and "✨" or "🌸"
-Star.TextSize = math.random(14, 24)
-Star.Size = UDim2.new(0, 30, 0, 30)
-Star.Position = UDim2.new(0.5, math.random(-80, 80), 0.5, math.random(-40, 40))
-Star.BackgroundTransparency = 1
-Star.ZIndex = 999
-Star.Parent = ScreenGui
-local targetX = Star.Position.X.Scale + (math.random(-25, 25) / 100)
-local targetY = Star.Position.Y.Scale + (math.random(15, 35) / 100)
-TweenService:Create(Star, TweenInfo.new(1.2, Enum.EasingStyle.OutQuad), {
-Position = UDim2.new(targetX, Star.Position.X.Offset, targetY, Star.Position.Y.Offset),
-TextTransparency = 1
-}):Play()
-game:GetService("Debris"):AddItem(Star, 1.3)
-end
-end
-task.spawn(SpawnCuteStarburst)
-local MenuVisible = true
-local function ToggleMenuVisibility()
-PlayCosmicChime(true)
-MenuVisible = not MenuVisible
-if MenuVisible then
-MainFrame.Visible = true
-MainFrame:TweenSize(UDim2.new(0, 660, 0, 380), Enum.EasingDirection.Out, Enum.EasingStyle.Back, 0.25, true)
+auraGrad.Color = ColorSequence.new({
+ColorSequenceKeypoint.new(0, THEME.Primary),
+ColorSequenceKeypoint.new(0.5, THEME.BgDark),
+ColorSequenceKeypoint.new(1, THEME.Secondary)
+})
+topLineGrad.Color = ColorSequence.new({
+ColorSequenceKeypoint.new(0, THEME.Primary),
+ColorSequenceKeypoint.new(1, THEME.Secondary)
+})
+local pHex = hexFromColor(THEME.Primary)
+local sHex = hexFromColor(THEME.Secondary)
+titleLabel.Text = string.format('NEXUS HUB // ANIME OS', pHex, sHex)
+reopenBtn.Text = string.format('NEXUS HUB', pHex, sHex)
+if THEME.SidebarRight then
+sidebar.Position = UDim2.new(1, -62, 0, 36)
+contentArea.Position = UDim2.new(0, 6, 0, 36)
+mascotImage.Position = UDim2.new(0, -35, 1, -138)
 else
-MainFrame:TweenSize(UDim2.new(0, 0, 0, 0), Enum.EasingDirection.In, Enum.EasingStyle.Back, 0.2, true, function()
-MainFrame.Visible = false
-end)
+sidebar.Position = UDim2.new(0, 6, 0, 36)
+contentArea.Position = UDim2.new(0, 68, 0, 36)
+mascotImage.Position = UDim2.new(1, -80, 1, -138)
+end
+for _, f in ipairs(REG.PanelFrames) do f.BackgroundColor3 = THEME.PanelBg end
+for _, f in ipairs(REG.RowFrames) do f.BackgroundColor3 = THEME.RowBg end
+for _, s in ipairs(REG.PrimaryStrokes) do s.Color = THEME.Primary end
+for _, s in ipairs(REG.SecondaryStrokes) do s.Color = THEME.Secondary end
+for _, t in ipairs(REG.PrimaryTexts) do t.TextColor3 = THEME.Primary end
+for _, t in ipairs(REG.SecondaryTexts) do t.TextColor3 = THEME.Secondary end
+for _, lbl in ipairs(REG.AllLabels) do lbl.Font = THEME.CurrentFont end
+for _, hdr in ipairs(REG.AllHeaders) do hdr.Font = THEME.HeaderFont end
+for _, pt in ipairs(REG.Particles) do
+pt.obj.Visible = THEME.ShowSparks and (pt.idx <= THEME.SparkCount)
+pt.obj.BackgroundColor3 = pt.isPri and THEME.Primary or THEME.Secondary
+end
+for name, tb in pairs(REG.TabButtons) do
+local active = (name == REG.ActiveTabName)
+tb.pill.Visible = active
+tb.pill.BackgroundColor3 = THEME.Secondary
+tb.btn.BackgroundColor3 = active and THEME.RowBg or THEME.PanelBg
+tb.stroke.Color = active and THEME.Secondary or THEME.Primary
+tb.icon.TextColor3 = active and THEME.Secondary or THEME.Primary
+tb.headerTitle.Font = THEME.HeaderFont
+tb.headerTitle.Text = string.format('%s  [%s]', string.upper(name), pHex, tb.sub)
+end
+for _, tg in ipairs(REG.Toggles) do
+local st = tg.getState()
+tg.circle.BackgroundColor3 = st and THEME.Secondary or THEME.Primary
+tg.stroke.Color = st and THEME.Secondary or THEME.Primary
+tg.rowStroke.Color = st and THEME.Secondary or THEME.Primary
+tg.pill.BackgroundColor3 = st and THEME.BgDark or THEME.PanelBg
+end
+for _, sl in ipairs(REG.Sliders) do
+sl.fill.BackgroundColor3 = THEME.Secondary
+sl.knob.BackgroundColor3 = THEME.Primary
+sl.valLbl.TextColor3 = THEME.Secondary
 end
 end
--- MOBILE FLOATING TOGGLE
-local FloatingButton = Instance.new("TextButton")
-FloatingButton.Size = UDim2.new(0, 50, 0, 55)
-FloatingButton.Position = UDim2.new(0, 10, 0.4, 0)
-FloatingButton.BackgroundColor3 = Color3.fromRGB(254, 248, 250)
-FloatingButton.Text = "👑"
-FloatingButton.TextSize = 20
-FloatingButton.ZIndex = 99999
-FloatingButton.Parent = ScreenGui
-local FloatCorner = Instance.new("UICorner")
-FloatCorner.CornerRadius = UDim.new(0, 12)
-FloatCorner.Parent = FloatingButton
-local FloatStroke = Instance.new("UIStroke")
-FloatStroke.Thickness = 2
-FloatStroke.Color = Color3.fromRGB(255, 165, 185)
-FloatStroke.Parent = FloatingButton
-FloatingButton.MouseButton1Click:Connect(ToggleMenuVisibility)
--- =============================================================================
--- PROFILE HEADER BANNER MODULAR COMPONENT
--- =============================================================================
-local Header = Instance.new("Frame")
-Header.Name = "Header"
-Header.Size = UDim2.new(1, -35, 0, 50)
-Header.Position = UDim2.new(0, 10, 0, 10)
-Header.BackgroundTransparency = 1
-Header.ZIndex = 11
-Header.Parent = MainFrame
-local AvatarBox = Instance.new("ImageLabel")
-AvatarBox.Size = UDim2.new(0, 36, 0, 36)
-AvatarBox.Position = UDim2.new(0, 5, 0, 7)
-AvatarBox.BackgroundColor3 = Color3.fromRGB(255, 225, 230)
-AvatarBox.Image = "rbxassetid://13437113111"
-AvatarBox.ZIndex = 12
-AvatarBox.Parent = Header
-local AvatarCorner = Instance.new("UICorner")
-AvatarCorner.CornerRadius = UDim.new(0, 12)
-AvatarCorner.Parent = AvatarBox
-local TitleText = Instance.new("TextLabel")
-TitleText.Size = UDim2.new(0, 250, 0, 20)
-TitleText.Position = UDim2.new(0, 52, 0, 6)
-TitleText.Text = "👑 JAY — EL MEJOR"
-TitleText.Font = Enum.Font.GothamBold
-TitleText.TextSize = 14
-TitleText.TextColor3 = Color3.fromRGB(85, 65, 75)
-TitleText.TextXAlignment = Enum.TextXAlignment.Left
-TitleText.BackgroundTransparency = 1
-TitleText.ZIndex = 12
-TitleText.Parent = Header
-local SubTitleText = Instance.new("TextLabel")
-SubTitleText.Size = UDim2.new(0, 200, 0, 14)
-SubTitleText.Position = UDim2.new(0, 52, 0, 24)
-SubTitleText.Text = "Sweet Clean Suite v4.0"
-SubTitleText.Font = Enum.Font.Gotham
-SubTitleText.TextSize = 10
-SubTitleText.TextColor3 = Color3.fromRGB(255, 130, 155)
-SubTitleText.TextXAlignment = Enum.TextXAlignment.Left
-SubTitleText.BackgroundTransparency = 1
-SubTitleText.ZIndex = 12
-SubTitleText.Parent = Header
-local StatusLabel = Instance.new("TextLabel")
-StatusLabel.Size = UDim2.new(0, 80, 0, 20)
-StatusLabel.Position = UDim2.new(1, -180, 0, 15)
-StatusLabel.Text = "🎀 ONLINE"
-StatusLabel.Font = Enum.Font.GothamBold
-StatusLabel.TextSize = 10
-StatusLabel.TextColor3 = Color3.fromRGB(255, 105, 140)
-StatusLabel.BackgroundTransparency = 1
-StatusLabel.ZIndex = 12
-StatusLabel.Parent = Header
-local UserTag = Instance.new("TextLabel")
-UserTag.Size = UDim2.new(0, 100, 0, 20)
-UserTag.Position = UDim2.new(1, -100, 0, 15)
-UserTag.Text = tostring(LocalPlayer.Name):upper()
-UserTag.Font = Enum.Font.Gotham
-UserTag.TextSize = 10
-UserTag.TextColor3 = Color3.fromRGB(165, 145, 150)
-UserTag.TextXAlignment = Enum.TextXAlignment.Right
-UserTag.BackgroundTransparency = 1
-UserTag.ZIndex = 12
-UserTag.Parent = Header
--- =============================================================================
--- VERTICAL BRANDING STRIPE BAR (RIGHT HAND WALL EDGE)
--- =============================================================================
-local RightStripe = Instance.new("Frame")
-RightStripe.Size = UDim2.new(0, 24, 1, -20)
-RightStripe.Position = UDim2.new(1, -30, 0, 10)
-RightStripe.BackgroundColor3 = Color3.fromRGB(255, 238, 242)
-RightStripe.BorderSizePixel = 0
-RightStripe.ZIndex = 11
-RightStripe.Parent = MainFrame
-local StripeCorner = Instance.new("UICorner")
-StripeCorner.CornerRadius = UDim.new(0, 6)
-StripeCorner.Parent = RightStripe
-local SideText = Instance.new("TextLabel")
-SideText.Size = UDim2.new(1, 0, 1, 0)
-SideText.Text = "J\nA\nY\n\nE\nL\n\nM\nE\nJ\nO\nR"
-SideText.Font = Enum.Font.GothamBold
-SideText.TextSize = 9
-SideText.TextColor3 = Color3.fromRGB(255, 110, 140)
-SideText.LineHeight = 1.1
-SideText.BackgroundTransparency = 1
-SideText.ZIndex = 12
-SideText.Parent = RightStripe
--- Left Side Tab Selector Navigation Panel
-local NavigationBar = Instance.new("Frame")
-NavigationBar.Size = UDim2.new(0, 140, 1, -80)
-NavigationBar.Position = UDim2.new(0, 10, 0, 70)
-NavigationBar.BackgroundTransparency = 1
-NavigationBar.ZIndex = 11
-NavigationBar.Parent = MainFrame
-local NavLayout = Instance.new("UIListLayout")
-NavLayout.Padding = UDim.new(0, 8)
-NavLayout.SortOrder = Enum.SortOrder.LayoutOrder
-NavLayout.Parent = NavigationBar
--- Right Main Content Frame View Box Window Wrapper
-local ContentWindow = Instance.new("Frame")
-ContentWindow.Size = UDim2.new(1, -200, 1, -95)
-ContentWindow.Position = UDim2.new(0, 160, 0, 85)
-ContentWindow.BackgroundTransparency = 1
-ContentWindow.ClipsDescendants = true
-ContentWindow.ZIndex = 11
-ContentWindow.Parent = MainFrame
-local FooterText = Instance.new("TextLabel")
-FooterText.Size = UDim2.new(0, 140, 0, 20)
-FooterText.Position = UDim2.new(0, 10, 1, -25)
-FooterText.Text = "JAY HUB ETERNAL ✨"
-FooterText.Font = Enum.Font.GothamBold
-FooterText.TextSize = 10
-FooterText.TextColor3 = Color3.fromRGB(255, 135, 155)
-FooterText.TextXAlignment = Enum.TextXAlignment.Center
-FooterText.BackgroundTransparency = 1
-FooterText.ZIndex = 11
-FooterText.Parent = MainFrame
-local Pages = {}
-local Tabs = {}
-local ActiveTab = nil
--- Dynamic Sliding Page Instantiation Framework Builder
-local function ConstructPage(categoryName)
-local Container = Instance.new("ScrollingFrame")
-Container.Name = categoryName .. "ViewWindow"
-Container.Size = UDim2.new(1, 0, 1, 0)
-Container.Position = UDim2.new(1, 50, 0, 0)
-Container.BackgroundTransparency = 1
-Container.BorderSizePixel = 0
-Container.ScrollBarThickness = 4
-Container.ScrollBarImageColor3 = Color3.fromRGB(255, 180, 195)
-Container.Visible = false
-Container.ZIndex = 12
-Container.Parent = ContentWindow
-local Grid = Instance.new("UIGridLayout")
-Grid.CellSize = UDim2.new(0, 218, 0, 42)
-Grid.CellPadding = UDim2.new(0, 14, 0, 10)
-Grid.SortOrder = Enum.SortOrder.LayoutOrder
-Grid.Parent = Container
-Grid:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-Container.CanvasSize = UDim2.new(0, 0, 0, Grid.AbsoluteContentSize.Y + 10)
-end)
-Pages[categoryName] = Container
-return Container
-end
--- Premium Kinetic Cute Feature Button Assembly
-local function ConstructElement(container, textLabel, priorityID)
-local FrameBlock = Instance.new("Frame")
-FrameBlock.Size = UDim2.new(0, 218, 0, 42)
-FrameBlock.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-FrameBlock.BorderSizePixel = 0
-FrameBlock.LayoutOrder = priorityID
-FrameBlock.ZIndex = 13
-FrameBlock.Parent = container
-local BlockCorner = Instance.new("UICorner")
-BlockCorner.CornerRadius = UDim.new(0, 8)
-BlockCorner.Parent = FrameBlock
-local InnerStroke = Instance.new("UIStroke")
-InnerStroke.Thickness = 1
-InnerStroke.Color = Color3.fromRGB(245, 232, 236)
-InnerStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-InnerStroke.Parent = FrameBlock
-local StarIcon = Instance.new("TextLabel")
-StarIcon.Size = UDim2.new(0, 15, 0, 15)
-StarIcon.Position = UDim2.new(0, 10, 0.5, -7)
-StarIcon.Text = "✨"
-StarIcon.TextSize = 10
-StarIcon.BackgroundTransparency = 1
-StarIcon.ZIndex = 14
-StarIcon.Parent = FrameBlock
-local Clicker = Instance.new("TextButton")
-Clicker.Size = UDim2.new(1, 0, 1, 0)
-Clicker.Text = " " .. textLabel
-Clicker.Font = Enum.Font.GothamBold
-Clicker.TextSize = 12
-Clicker.TextColor3 = Color3.fromRGB(90, 75, 82)
-Clicker.TextXAlignment = Enum.TextXAlignment.Left
-Clicker.BackgroundTransparency = 1
-Clicker.ZIndex = 15
-Clicker.Parent = FrameBlock
--- Soft Spring Hover Micro-interactions
-Clicker.MouseEnter:Connect(function()
-TweenService:Create(FrameBlock, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(255, 238, 243)}):Play()
-TweenService:Create(InnerStroke, TweenInfo.new(0.2), {Color = Color3.fromRGB(255, 145, 170)}):Play()
-end)
-Clicker.MouseLeave:Connect(function()
-TweenService:Create(FrameBlock, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(255, 255, 255)}):Play()
-TweenService:Create(InnerStroke, TweenInfo.new(0.2), {Color = Color3.fromRGB(245, 232, 236)}):Play()
-end)
-Clicker.MouseButton1Click:Connect(function()
-PlayCosmicChime(false)
-FrameBlock:TweenSize(UDim2.new(0, 222, 0, 44), Enum.EasingDirection.Out, Enum.EasingStyle.Back, 0.12, true)
-task.wait(0.12)
-FrameBlock:TweenSize(UDim2.new(0, 218, 0, 42), Enum.EasingDirection.Out, Enum.EasingStyle.Back, 0.12, true)
-end)
-end
--- Sliding Tab Navigation Switch System Engine
-local function CreateCategoryLink(categoryName, shortcutKey, sortingID)
-local NavBtn = Instance.new("TextButton")
-NavBtn.Size = UDim2.new(1, 0, 0, 34)
-NavBtn.Text = " " .. shortcutKey .. " " .. categoryName:upper()
-NavBtn.Font = Enum.Font.SourceSansBold
-NavBtn.TextSize = 12
-NavBtn.TextColor3 = Color3.fromRGB(155, 138, 142)
-NavBtn.TextXAlignment = Enum.TextXAlignment.Left
-NavBtn.BackgroundTransparency = 1
-NavBtn.LayoutOrder = sortingID
-NavBtn.ZIndex = 12
-NavBtn.Parent = NavigationBar
-local IndicatorLine = Instance.new("Frame")
-IndicatorLine.Size = UDim2.new(0, 3, 1, -12)
-IndicatorLine.Position = UDim2.new(0, -2, 0, 6)
-IndicatorLine.BackgroundColor3 = Color3.fromRGB(255, 110, 140)
-IndicatorLine.Visible = false
-IndicatorLine.BorderSizePixel = 0
-IndicatorLine.ZIndex = 13
-IndicatorLine.Parent = NavBtn
-NavBtn.MouseButton1Click:Connect(function()
-PlayCosmicChime(true)
-for name, page in pairs(Pages) do
-if page.Visible then
-page:TweenPosition(UDim2.new(1, 50, 0, 0), Enum.EasingDirection.In, Enum.EasingStyle.Quad, 0.15, true, function()
+-- ==========================================
+-- TAB & CONTROL BUILDERS
+-- ==========================================
+local tabs = {}
+local function createTab(tabName, subLabel, iconGlyph)
+local btn = Instance.new("TextButton")
+btn.Size = UDim2.new(0, 44, 0, 32)
+btn.BackgroundColor3 = THEME.PanelBg
+btn.BackgroundTransparency = 0.15
+btn.Text = ""
+btn.AutoButtonColor = false
+btn.ZIndex = 7
+btn.Parent = sidebar
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 6)
+corner.Parent = btn
+local stroke = Instance.new("UIStroke")
+stroke.Thickness = 1.5
+stroke.Color = THEME.Primary
+stroke.Transparency = 0.45
+stroke.Parent = btn
+local activePill = Instance.new("Frame")
+activePill.Size = UDim2.new(0, 3, 0.65, 0)
+activePill.Position = UDim2.new(0, 0, 0.175, 0)
+activePill.BackgroundColor3 = THEME.Secondary
+activePill.BorderSizePixel = 0
+activePill.Visible = false
+activePill.ZIndex = 8
+activePill.Parent = btn
+local iconLbl = Instance.new("TextLabel")
+iconLbl.Size = UDim2.new(1, 0, 0, 17)
+iconLbl.Position = UDim2.new(0, 0, 0, 2)
+iconLbl.BackgroundTransparency = 1
+iconLbl.Text = iconGlyph
+iconLbl.TextColor3 = THEME.Primary
+iconLbl.Font = THEME.HeaderFont
+iconLbl.TextSize = 12
+iconLbl.ZIndex = 8
+iconLbl.Parent = btn
+local tagLbl = Instance.new("TextLabel")
+tagLbl.Size = UDim2.new(1, 0, 0, 11)
+tagLbl.Position = UDim2.new(0, 0, 1, -12)
+tagLbl.BackgroundTransparency = 1
+tagLbl.Text = subLabel
+tagLbl.TextColor3 = THEME.TextMuted
+tagLbl.Font = THEME.CurrentFont
+tagLbl.TextSize = 7
+tagLbl.ZIndex = 8
+tagLbl.Parent = btn
+local page = Instance.new("Frame")
+page.Size = UDim2.new(1, 0, 1, 0)
+page.BackgroundTransparency = 1
 page.Visible = false
+page.ZIndex = 6
+page.Parent = contentArea
+local header = Instance.new("Frame")
+header.Size = UDim2.new(1, 0, 0, 24)
+header.BackgroundColor3 = THEME.PanelBg
+header.BackgroundTransparency = 0.15
+header.ZIndex = 7
+header.Parent = page
+table.insert(REG.PanelFrames, header)
+local hCorner = Instance.new("UICorner")
+hCorner.CornerRadius = UDim.new(0, 6)
+hCorner.Parent = header
+local hStroke = Instance.new("UIStroke")
+hStroke.Thickness = 1
+hStroke.Color = THEME.Secondary
+hStroke.Transparency = 0.55
+hStroke.Parent = header
+table.insert(REG.SecondaryStrokes, hStroke)
+local accentBar = Instance.new("Frame")
+accentBar.Size = UDim2.new(0, 4, 1, 0)
+accentBar.BackgroundColor3 = THEME.Primary
+accentBar.BorderSizePixel = 0
+accentBar.ZIndex = 8
+accentBar.Parent = header
+table.insert(REG.RowFrames, accentBar)
+local hTitle = Instance.new("TextLabel")
+hTitle.Size = UDim2.new(0.75, 0, 1, 0)
+hTitle.Position = UDim2.new(0, 10, 0, 0)
+hTitle.BackgroundTransparency = 1
+hTitle.RichText = true
+hTitle.TextColor3 = THEME.TextWhite
+hTitle.Font = THEME.HeaderFont
+hTitle.TextSize = 11
+hTitle.TextXAlignment = Enum.TextXAlignment.Left
+hTitle.ZIndex = 8
+hTitle.Parent = header
+local hRight = Instance.new("TextLabel")
+hRight.Size = UDim2.new(0.25, 0, 1, 0)
+hRight.Position = UDim2.new(0.75, -8, 0, 0)
+hRight.BackgroundTransparency = 1
+hRight.Text = "NEXUS // OS"
+hRight.TextColor3 = THEME.Secondary
+hRight.Font = THEME.CurrentFont
+hRight.TextSize = 8
+hRight.TextXAlignment = Enum.TextXAlignment.Right
+hRight.ZIndex = 8
+hRight.Parent = header
+table.insert(REG.SecondaryTexts, hRight)
+local itemsHolder = Instance.new("ScrollingFrame")
+itemsHolder.Size = UDim2.new(1, 0, 1, -29)
+itemsHolder.Position = UDim2.new(0, 0, 0, 28)
+itemsHolder.BackgroundTransparency = 1
+itemsHolder.ScrollBarThickness = 2
+itemsHolder.CanvasSize = UDim2.new(0, 0, 0, 0)
+itemsHolder.AutomaticCanvasSize = Enum.AutomaticSize.Y
+itemsHolder.ZIndex = 7
+itemsHolder.Parent = page
+local list = Instance.new("UIListLayout")
+list.Padding = UDim.new(0, 5)
+list.Parent = itemsHolder
+tabs[tabName] = page
+REG.TabButtons[tabName] = {
+btn = btn,
+stroke = stroke,
+icon = iconLbl,
+tag = tagLbl,
+pill = activePill,
+headerTitle = hTitle,
+sub = subLabel
+}
+local function selectTab()
+REG.ActiveTabName = tabName
+for name, p in pairs(tabs) do
+p.Visible = (name == tabName)
+end
+applyTheme()
+end
+btn.MouseButton1Click:Connect(selectTab)
+return itemsHolder, selectTab
+end
+local function addSectionHeader(parent, titleText)
+local lbl = Instance.new("TextLabel")
+lbl.Size = UDim2.new(1, -4, 0, 18)
+lbl.BackgroundTransparency = 1
+lbl.Text = "── " .. string.upper(titleText) .. " ──"
+lbl.TextColor3 = THEME.Primary
+lbl.Font = THEME.HeaderFont
+lbl.TextSize = 10
+lbl.ZIndex = 8
+lbl.Parent = parent
+table.insert(REG.PrimaryTexts, lbl)
+table.insert(REG.AllHeaders, lbl)
+end
+local function addSlider(parent, labelText, minVal, maxVal, defaultVal, callback)
+local row = Instance.new("Frame")
+row.Size = UDim2.new(1, -4, 0, 32)
+row.BackgroundColor3 = THEME.RowBg
+row.BackgroundTransparency = 0.2
+row.ZIndex = 7
+row.Parent = parent
+table.insert(REG.RowFrames, row)
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 6)
+corner.Parent = row
+local rStroke = Instance.new("UIStroke")
+rStroke.Thickness = 1
+rStroke.Color = THEME.Secondary
+rStroke.Transparency = 0.75
+rStroke.Parent = row
+table.insert(REG.SecondaryStrokes, rStroke)
+local label = Instance.new("TextLabel")
+label.Size = UDim2.new(0, 105, 1, 0)
+label.Position = UDim2.new(0, 10, 0, 0)
+label.BackgroundTransparency = 1
+label.Text = labelText
+label.TextColor3 = THEME.TextWhite
+label.Font = THEME.CurrentFont
+label.TextSize = 11
+label.TextXAlignment = Enum.TextXAlignment.Left
+label.ZIndex = 8
+label.Parent = row
+table.insert(REG.AllLabels, label)
+local valueLabel = Instance.new("TextLabel")
+valueLabel.Size = UDim2.new(0, 34, 1, 0)
+valueLabel.Position = UDim2.new(1, -40, 0, 0)
+valueLabel.BackgroundTransparency = 1
+valueLabel.Text = tostring(defaultVal)
+valueLabel.TextColor3 = THEME.Secondary
+valueLabel.Font = THEME.HeaderFont
+valueLabel.TextSize = 11
+valueLabel.TextXAlignment = Enum.TextXAlignment.Right
+valueLabel.ZIndex = 8
+valueLabel.Parent = row
+table.insert(REG.AllHeaders, valueLabel)
+local track = Instance.new("TextButton")
+track.Size = UDim2.new(1, -162, 0, 5)
+track.Position = UDim2.new(0, 115, 0.5, -2.5)
+track.BackgroundColor3 = Color3.fromRGB(12, 15, 25)
+track.Text = ""
+track.AutoButtonColor = false
+track.ZIndex = 8
+track.Parent = row
+local trackCorner = Instance.new("UICorner")
+trackCorner.CornerRadius = UDim.new(1, 0)
+trackCorner.Parent = track
+local startPct = math.clamp((defaultVal - minVal) / (maxVal - minVal), 0, 1)
+local fill = Instance.new("Frame")
+fill.Size = UDim2.new(startPct, 0, 1, 0)
+fill.BackgroundColor3 = THEME.Secondary
+fill.BorderSizePixel = 0
+fill.ZIndex = 9
+fill.Parent = track
+local fillCorner = Instance.new("UICorner")
+fillCorner.CornerRadius = UDim.new(1, 0)
+fillCorner.Parent = fill
+local knob = Instance.new("Frame")
+knob.Size = UDim2.new(0, 13, 0, 13)
+knob.Position = UDim2.new(startPct, -6.5, 0.5, -6.5)
+knob.BackgroundColor3 = THEME.Primary
+knob.ZIndex = 10
+knob.Parent = track
+local knobCorner = Instance.new("UICorner")
+knobCorner.CornerRadius = UDim.new(1, 0)
+knobCorner.Parent = knob
+local knobStroke = Instance.new("UIStroke")
+knobStroke.Thickness = 1.5
+knobStroke.Color = THEME.TextWhite
+knobStroke.Parent = knob
+table.insert(REG.Sliders, {fill = fill, knob = knob, valLbl = valueLabel})
+local sliding = false
+local function updateSlider(inputPos)
+local relX = math.clamp((inputPos.X - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
+local val = math.floor(minVal + (maxVal - minVal) * relX)
+fill.Size = UDim2.new(relX, 0, 1, 0)
+knob.Position = UDim2.new(relX, -6.5, 0.5, -6.5)
+valueLabel.Text = tostring(val)
+callback(val)
+end
+track.InputBegan:Connect(function(input)
+if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+sliding = true
+updateSlider(input.Position)
+end
+end)
+UserInputService.InputEnded:Connect(function(input)
+if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+sliding = false
+end
+end)
+UserInputService.InputChanged:Connect(function(input)
+if sliding and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+updateSlider(input.Position)
+end
 end)
 end
-end
-for _, btn in ipairs(NavigationBar:GetChildren()) do
-if btn:IsA("TextButton") then
-btn.TextColor3 = Color3.fromRGB(155, 138, 142)
-btn:FindFirstChild("Frame").Visible = false
-end
-end
-local TargetPage = Pages[categoryName]
-TargetPage.Visible = true
-TargetPage:TweenPosition(UDim2.new(0, 0, 0, 0), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.25, true)
-NavBtn.TextColor3 = Color3.fromRGB(255, 105, 140)
-IndicatorLine.Visible = true
+local function addToggle(parent, labelText, defaultState, callback)
+local state = defaultState
+local row = Instance.new("Frame")
+row.Size = UDim2.new(1, -4, 0, 32)
+row.BackgroundColor3 = THEME.RowBg
+row.BackgroundTransparency = 0.2
+row.ZIndex = 7
+row.Parent = parent
+table.insert(REG.RowFrames, row)
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 6)
+corner.Parent = row
+local rStroke = Instance.new("UIStroke")
+rStroke.Thickness = 1
+rStroke.Color = state and THEME.Secondary or THEME.Primary
+rStroke.Transparency = 0.7
+rStroke.Parent = row
+local label = Instance.new("TextLabel")
+label.Size = UDim2.new(0.75, 0, 1, 0)
+label.Position = UDim2.new(0, 10, 0, 0)
+label.BackgroundTransparency = 1
+label.Text = labelText
+label.TextColor3 = THEME.TextWhite
+label.Font = THEME.CurrentFont
+label.TextSize = 11
+label.TextXAlignment = Enum.TextXAlignment.Left
+label.ZIndex = 8
+label.Parent = row
+table.insert(REG.AllLabels, label)
+local pill = Instance.new("TextButton")
+pill.Size = UDim2.new(0, 38, 0, 18)
+pill.Position = UDim2.new(1, -46, 0.5, -9)
+pill.BackgroundColor3 = state and THEME.BgDark or THEME.PanelBg
+pill.Text = ""
+pill.AutoButtonColor = false
+pill.ZIndex = 8
+pill.Parent = row
+local pillCorner = Instance.new("UICorner")
+pillCorner.CornerRadius = UDim.new(1, 0)
+pillCorner.Parent = pill
+local pillStroke = Instance.new("UIStroke")
+pillStroke.Thickness = 1.5
+pillStroke.Color = state and THEME.Secondary or THEME.Primary
+pillStroke.Parent = pill
+local circle = Instance.new("Frame")
+circle.Size = UDim2.new(0, 13, 0, 13)
+circle.Position = state and UDim2.new(1, -15.5, 0.5, -6.5) or UDim2.new(0, 2.5, 0.5, -6.5)
+circle.BackgroundColor3 = state and THEME.Secondary or THEME.Primary
+circle.ZIndex = 9
+circle.Parent = pill
+local circleCorner = Instance.new("UICorner")
+circleCorner.CornerRadius = UDim.new(1, 0)
+circleCorner.Parent = circle
+table.insert(REG.Toggles, {
+getState = function() return state end,
+circle = circle,
+stroke = pillStroke,
+rowStroke = rStroke,
+pill = pill
+})
+pill.MouseButton1Click:Connect(function()
+state = not state
+TweenService:Create(circle, TweenInfo.new(0.18), {
+Position = state and UDim2.new(1, -15.5, 0.5, -6.5) or UDim2.new(0, 2.5, 0.5, -6.5),
+BackgroundColor3 = state and THEME.Secondary or THEME.Primary
+}):Play()
+pillStroke.Color = state and THEME.Secondary or THEME.Primary
+rStroke.Color = state and THEME.Secondary or THEME.Primary
+callback(state)
 end)
-if not ActiveTab then ActiveTab = NavBtn end
-Tabs[categoryName] = NavBtn
 end
--- =============================================================================
--- THE DATA ARRAYS SEEDED FROM ALL PREVIOUS VIEWS
--- =============================================================================
-CreateCategoryLink("Weapons", "[W]", 1)
-local wPage = ConstructPage("Weapons")
-local wItems = {"GET TOOLS", "RESPAWN (OFF)", "NO COOLDOWN", "HIT BOX", "2X DAMAGE USE (OFF)", "LOOPBRING", "GET BASE (OFF)", "AUTO BUY"}
-for i, name in ipairs(wItems) do ConstructElement(wPage, name, i) end
-CreateCategoryLink("Mobility", "[M]", 2)
-local mPage = ConstructPage("Mobility")
-local mItems = {"SPEED-JUMP", "ANTI VOID", "SPAWNPOINT", "HEX SHIELD", "FLY", "INFINITY YIELD", "GIANT LASER", "GET TRAPS"}
-for i, name in ipairs(mItems) do ConstructElement(mPage, name, i) end
-CreateCategoryLink("Tools", "[T]", 3)
-local tPage = ConstructPage("Tools")
-local tItems = {"ANTI KICK", "USE TOOLS 2", "KILL COUNTER", "GAME BOOST", "ANTI LAG", "LAG SERVER", "VIEW", "FLING-GUI"}
-for i, name in ipairs(tItems) do ConstructElement(tPage, name, i) end
-CreateCategoryLink("Power", "[P]", 4)
-local pPage = ConstructPage("Power")
-local pItems = {"ANTI LAG NOCO V1", "BEAST MODE", "LOOP TOOLS", "LASERS", "AXE SMASH (OFF)", "ROTATING TOOLS", "REJOIN", "GOD MODE"}
-for i, name in ipairs(pItems) do ConstructElement(pPage, name, i) end
-CreateCategoryLink("Extra", "[E]", 5)
-local ePage = ConstructPage("Extra")
-local eItems = {"FLOAT TOOLS", "REACH 1", "REACH 2", "USE TOOLS 3 (OFF)", "TARGETS", "KILL AURA", "GET ALL TOOLS (OFF)", "BOOST KILL"}
-for i, name in ipairs(eItems) do ConstructElement(ePage, "Jay Tool: " .. name, i) end
--- PERFORMANCE DASHBOARD ENGINE (TAB 6)
-CreateCategoryLink("Dashboard", "[D]", 6)
-local dPage = Instance.new("Frame")
-dPage.Name = "DashboardViewWindow"
-dPage.Size = UDim2.new(1, 0, 1, 0)
-dPage.Position = UDim2.new(1, 50, 0, 0)
-dPage.BackgroundTransparency = 1
-dPage.Visible = false
-dPage.ZIndex = 12
-dPage.Parent = ContentWindow
-Pages["Dashboard"] = dPage
-local StatsBox = Instance.new("Frame")
-StatsBox.Size = UDim2.new(1, -10, 0, 110)
-StatsBox.Position = UDim2.new(0, 5, 0, 5)
-StatsBox.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-StatsBox.BorderSizePixel = 0
-StatsBox.ZIndex = 13
-StatsBox.Parent = dPage
-local StatsCorner = Instance.new("UICorner")
-StatsCorner.CornerRadius = UDim.new(0, 8)
-StatsCorner.Parent = StatsBox
-local StatsStroke = Instance.new("UIStroke")
-StatsStroke.Thickness = 1
-StatsStroke.Color = Color3.fromRGB(245, 232, 236)
-StatsStroke.Parent = StatsBox
-local DashboardTitle = Instance.new("TextLabel")
-DashboardTitle.Size = UDim2.new(1, -20, 0, 25)
-DashboardTitle.Position = UDim2.new(0, 12, 0, 8)
-DashboardTitle.Text = "JAY'S SYSTEM METRICS"
-DashboardTitle.Font = Enum.Font.GothamBold
-DashboardTitle.TextSize = 11
-DashboardTitle.TextColor3 = Color3.fromRGB(255, 105, 140)
-DashboardTitle.TextXAlignment = Enum.TextXAlignment.Left
-DashboardTitle.BackgroundTransparency = 1
-DashboardTitle.ZIndex = 14
-DashboardTitle.Parent = StatsBox
-local PingText = Instance.new("TextLabel")
-PingText.Size = UDim2.new(1, -20, 0, 20)
-PingText.Position = UDim2.new(0, 12, 0, 36)
-PingText.Text = "Ping: -- ms"
-PingText.Font = Enum.Font.GothamBold
-PingText.TextSize = 12
-PingText.TextColor3 = Color3.fromRGB(255, 125, 150)
-PingText.TextXAlignment = Enum.TextXAlignment.Left
-PingText.BackgroundTransparency = 1
-PingText.ZIndex = 14
-PingText.Parent = StatsBox
-local FpsText = Instance.new("TextLabel")
-FpsText.Size = UDim2.new(1, -20, 0, 20)
-FpsText.Position = UDim2.new(0, 12, 0, 56)
-FpsText.Text = "FPS: --"
-FpsText.Font = Enum.Font.GothamBold
-FpsText.TextSize = 12
-FpsText.TextColor3 = Color3.fromRGB(90, 75, 82)
-FpsText.TextXAlignment = Enum.TextXAlignment.Left
-FpsText.BackgroundTransparency = 1
-FpsText.ZIndex = 14
-FpsText.Parent = StatsBox
-local TimerText = Instance.new("TextLabel")
-TimerText.Size = UDim2.new(1, -20, 0, 20)
-TimerText.Position = UDim2.new(0, 12, 0, 76)
-TimerText.Text = "Server Timer: 0h 0m 0s"
-TimerText.Font = Enum.Font.GothamBold
-TimerText.TextSize = 12
-TimerText.TextColor3 = Color3.fromRGB(145, 130, 135)
-TimerText.TextXAlignment = Enum.TextXAlignment.Left
-TimerText.BackgroundTransparency = 1
-TimerText.ZIndex = 14
-TimerText.Parent = StatsBox
-local InitialStartTimestamp = os.time()
-RunService.RenderStepped:Connect(function()
-local TimeElapsed = os.time() - InitialStartTimestamp
-local Hours = math.floor(TimeElapsed / 3600)
-local Minutes = math.floor((TimeElapsed % 3600) / 60)
-local Seconds = TimeElapsed % 60
-TimerText.Text = string.format("Server Timer: %dh %dm %ds", Hours, Minutes, Seconds)
-local CurrentFPS = math.floor(1 / task.wait())
-FpsText.Text = "FPS: " .. tostring(math.clamp(CurrentFPS, 10, 60))
-local EstimatedPing = math.random(68, 79)
-PingText.Text = "Ping: " .. tostring(EstimatedPing) .. " ms (Perfect)"
+local function addActionButton(parent, labelText, callback)
+local btn = Instance.new("TextButton")
+btn.Size = UDim2.new(1, -4, 0, 29)
+btn.BackgroundColor3 = THEME.RowBg
+btn.BackgroundTransparency = 0.1
+btn.Text = labelText
+btn.TextColor3 = THEME.Secondary
+btn.Font = THEME.HeaderFont
+btn.TextSize = 11
+btn.ZIndex = 8
+btn.Parent = parent
+table.insert(REG.RowFrames, btn)
+table.insert(REG.SecondaryTexts, btn)
+table.insert(REG.AllHeaders, btn)
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 6)
+corner.Parent = btn
+local stroke = Instance.new("UIStroke")
+stroke.Thickness = 1.5
+stroke.Color = THEME.Primary
+stroke.Parent = btn
+table.insert(REG.PrimaryStrokes, stroke)
+btn.MouseButton1Click:Connect(function()
+callback(btn)
 end)
--- Initialize Default Tab State On Launch Sequence
-if ActiveTab then
-Pages["Weapons"].Visible = true
-Pages["Weapons"].Position = UDim2.new(0, 0, 0, 0)
-ActiveTab.TextColor3 = Color3.fromRGB(255, 105, 140)
-ActiveTab:FindFirstChild("Frame").Visible = true
+return btn
 end
-print("Jay Hub v4.1: Security Terminal Integration Handshake Complete.")
+-- ==========================================
+-- AVATAR AURA FX SYSTEM (For the Home Tab!)
+-- ==========================================
+local AURA_CFG = {
+Color = Color3.fromRGB(255, 35, 75),
+SecondaryColor = Color3.fromRGB(30, 175, 255),
+Rainbow = false,
+Pulse = false,
+Intensity = 1.0,
+FolderName = "NexusAvatarAuraFX"
+}
+local function getAuraFolder()
+local char = player.Character
+if not char then return nil end
+local f = char:FindFirstChild(AURA_CFG.FolderName)
+if not f then
+f = Instance.new("Folder")
+f.Name = AURA_CFG.FolderName
+f.Parent = char
+end
+return f
+end
+local function clearAllAuras()
+local char = player.Character
+if not char then return end
+local f = char:FindFirstChild(AURA_CFG.FolderName)
+if f then f:Destroy() end
+AURA_CFG.Rainbow = false
+AURA_CFG.Pulse = false
+end
+local function setHighlightAura(enabled)
+local f = getAuraFolder()
+if not f then return end
+local hl = f:FindFirstChild("AuraHighlight")
+if enabled then
+if not hl then
+hl = Instance.new("Highlight")
+hl.Name = "AuraHighlight"
+hl.FillColor = AURA_CFG.Color
+hl.OutlineColor = AURA_CFG.SecondaryColor
+hl.FillTransparency = 0.65
+hl.OutlineTransparency = 0
+hl.Parent = f
+hl.Adornee = player.Character
+end
+elseif hl then
+hl:Destroy()
+end
+end
+local function setKiFlames(enabled)
+local char = player.Character
+local root = char and char:FindFirstChild("HumanoidRootPart")
+local f = getAuraFolder()
+if not root or not f then return end
+local existing = f:FindFirstChild("KiFlameEmitter")
+if enabled then
+if not existing then
+local att = Instance.new("Attachment")
+att.Name = "KiFlameEmitter"
+att.Parent = root
+local pe = Instance.new("ParticleEmitter")
+pe.Name = "Flames"
+pe.Color = ColorSequence.new(AURA_CFG.Color, AURA_CFG.SecondaryColor)
+pe.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 1.8), NumberSequenceKeypoint.new(1, 0)})
+pe.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.2), NumberSequenceKeypoint.new(1, 1)})
+pe.Lifetime = NumberRange.new(0.5, 0.9)
+pe.Rate = 45
+pe.Speed = NumberRange.new(4, 9)
+pe.SpreadAngle = Vector2.new(35, 35)
+pe.Acceleration = Vector3.new(0, 12, 0)
+pe.LightEmission = 1
+pe.Parent = att
+end
+elseif existing then
+existing:Destroy()
+end
+end
+local function setLightningSparks(enabled)
+local char = player.Character
+local root = char and char:FindFirstChild("HumanoidRootPart")
+local f = getAuraFolder()
+if not root or not f then return end
+local existing = f:FindFirstChild("LightningEmitter")
+if enabled then
+if not existing then
+local att = Instance.new("Attachment")
+att.Name = "LightningEmitter"
+att.Parent = root
+local pe = Instance.new("ParticleEmitter")
+pe.Name = "Sparks"
+pe.Color = ColorSequence.new(AURA_CFG.SecondaryColor, Color3.new(1, 1, 1))
+pe.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.45), NumberSequenceKeypoint.new(1, 0)})
+pe.Lifetime = NumberRange.new(0.15, 0.35)
+pe.Rate = 55
+pe.Speed = NumberRange.new(8, 16)
+pe.SpreadAngle = Vector2.new(180, 180)
+pe.LightEmission = 1
+pe.Parent = att
+end
+elseif existing then
+existing:Destroy()
+end
+end
+local function setSakuraOrbit(enabled)
+local char = player.Character
+local root = char and char:FindFirstChild("HumanoidRootPart")
+local f = getAuraFolder()
+if not root or not f then return end
+local existing = f:FindFirstChild("SakuraPetals")
+if enabled then
+if not existing then
+local att = Instance.new("Attachment")
+att.Name = "SakuraPetals"
+att.Parent = root
+local pe = Instance.new("ParticleEmitter")
+pe.Name = "Petals"
+pe.Color = ColorSequence.new(Color3.fromRGB(255, 130, 195), AURA_CFG.Color)
+pe.Size = NumberSequence.new(0.35)
+pe.Lifetime = NumberRange.new(1.5, 2.5)
+pe.Rate = 25
+pe.Speed = NumberRange.new(2, 5)
+pe.RotSpeed = NumberRange.new(-180, 180)
+pe.SpreadAngle = Vector2.new(180, 180)
+pe.Acceleration = Vector3.new(0, -2, 0)
+pe.LightEmission = 0.6
+pe.Parent = att
+end
+elseif existing then
+existing:Destroy()
+end
+end
+local function setShadowSmoke(enabled)
+local char = player.Character
+local root = char and char:FindFirstChild("HumanoidRootPart")
+local f = getAuraFolder()
+if not root or not f then return end
+local existing = f:FindFirstChild("ShadowSmoke")
+if enabled then
+if not existing then
+local att = Instance.new("Attachment")
+att.Name = "ShadowSmoke"
+att.Parent = root
+local pe = Instance.new("ParticleEmitter")
+pe.Name = "DarkAura"
+pe.Color = ColorSequence.new(Color3.fromRGB(15, 10, 25), AURA_CFG.Color)
+pe.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 2.2), NumberSequenceKeypoint.new(1, 3.2)})
+pe.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.35), NumberSequenceKeypoint.new(1, 1)})
+pe.Lifetime = NumberRange.new(0.7, 1.2)
+pe.Rate = 30
+pe.Speed = NumberRange.new(1, 4)
+pe.SpreadAngle = Vector2.new(180, 180)
+pe.Acceleration = Vector3.new(0, 5, 0)
+pe.Parent = att
+end
+elseif existing then
+existing:Destroy()
+end
+end
+local function setEnergyWings(enabled)
+local char = player.Character
+local torso = char and (char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso"))
+local f = getAuraFolder()
+if not torso or not f then return end
+local existing = f:FindFirstChild("EnergyWings")
+if enabled then
+if not existing then
+local wingModel = Instance.new("Model")
+wingModel.Name = "EnergyWings"
+wingModel.Parent = f
+for side = -1, 1, 2 do
+for blade = 1, 3 do
+local part = Instance.new("Part")
+part.Size = Vector3.new(0.15, 0.45, 2.4 + (blade * 0.4))
+part.Material = Enum.Material.Neon
+part.Color = (blade % 2 == 0) and AURA_CFG.SecondaryColor or AURA_CFG.Color
+part.CanCollide = false
+part.Massless = true
+part.Parent = wingModel
+local weld = Instance.new("Weld")
+weld.Part0 = torso
+weld.Part1 = part
+weld.C0 = CFrame.new(side * (0.8 + blade * 0.45), 0.4 + (blade * 0.35), 0.9)
+* CFrame.Angles(math.rad(15 * blade), math.rad(side * (35 + blade * 12)), math.rad(side * -20))
+weld.Parent = part
+end
+end
+end
+elseif existing then
+existing:Destroy()
+end
+end
+local function setDivineHalo(enabled)
+local char = player.Character
+local head = char and char:FindFirstChild("Head")
+local f = getAuraFolder()
+if not head or not f then return end
+local existing = f:FindFirstChild("DivineHalo")
+if enabled then
+if not existing then
+local halo = Instance.new("Part")
+halo.Name = "DivineHalo"
+halo.Shape = Enum.PartType.Cylinder
+halo.Size = Vector3.new(0.12, 2.2, 2.2)
+halo.Material = Enum.Material.Neon
+halo.Color = AURA_CFG.SecondaryColor
+halo.CanCollide = false
+halo.Massless = true
+halo.Parent = f
+local weld = Instance.new("Weld")
+weld.Part0 = head
+weld.Part1 = halo
+weld.C0 = CFrame.new(0, 1.35, 0) * CFrame.Angles(0, 0, math.rad(90))
+weld.Parent = halo
+end
+elseif existing then
+existing:Destroy()
+end
+end
+local function setOrbitOrbs(enabled)
+local char = player.Character
+local root = char and char:FindFirstChild("HumanoidRootPart")
+local f = getAuraFolder()
+if not root or not f then return end
+local existing = f:FindFirstChild("OrbitOrbs")
+if enabled then
+if not existing then
+local orbFolder = Instance.new("Folder")
+orbFolder.Name = "OrbitOrbs"
+orbFolder.Parent = f
+for i = 1, 4 do
+local orb = Instance.new("Part")
+orb.Name = "Orb" .. i
+orb.Shape = Enum.PartType.Ball
+orb.Size = Vector3.new(0.65, 0.65, 0.65)
+orb.Material = Enum.Material.Neon
+orb.Color = (i % 2 == 0) and AURA_CFG.Primary or AURA_CFG.SecondaryColor
+orb.CanCollide = false
+orb.Anchored = true
+orb.Parent = orbFolder
+local tr = Instance.new("Trail")
+local a0 = Instance.new("Attachment", orb)
+local a1 = Instance.new("Attachment", orb)
+a0.Position = Vector3.new(0, 0.25, 0)
+a1.Position = Vector3.new(0, -0.25, 0)
+tr.Attachment0 = a0
+tr.Attachment1 = a1
+tr.Lifetime = 0.35
+tr.Color = ColorSequence.new(orb.Color)
+tr.LightEmission = 1
+tr.Parent = orb
+end
+end
+elseif existing then
+existing:Destroy()
+end
+end
+local function setBodyTrails(enabled)
+local char = player.Character
+local f = getAuraFolder()
+if not char or not f then return end
+local existing = f:FindFirstChild("BodyTrails")
+if enabled then
+if not existing then
+local tf = Instance.new("Folder")
+tf.Name = "BodyTrails"
+tf.Parent = f
+for _, partName in ipairs({"LeftHand", "RightHand", "Left Arm", "Right Arm", "HumanoidRootPart"}) do
+local p = char:FindFirstChild(partName)
+if p and p:IsA("BasePart") then
+local a0 = Instance.new("Attachment", p)
+local a1 = Instance.new("Attachment", p)
+a0.Position = Vector3.new(0, 0.5, 0)
+a1.Position = Vector3.new(0, -0.5, 0)
+local tr = Instance.new("Trail")
+tr.Attachment0 = a0
+tr.Attachment1 = a1
+tr.Lifetime = 0.45
+tr.Color = ColorSequence.new(AURA_CFG.Color, AURA_CFG.SecondaryColor)
+tr.LightEmission = 1
+tr.Parent = tf
+end
+end
+end
+elseif existing then
+existing:Destroy()
+end
+end
+local function setGroundRing(enabled)
+local char = player.Character
+local root = char and char:FindFirstChild("HumanoidRootPart")
+local f = getAuraFolder()
+if not root or not f then return end
+local existing = f:FindFirstChild("GroundShockRing")
+if enabled then
+if not existing then
+local ring = Instance.new("Part")
+ring.Name = "GroundShockRing"
+ring.Shape = Enum.PartType.Cylinder
+ring.Size = Vector3.new(0.1, 7.5, 7.5)
+ring.Material = Enum.Material.Neon
+ring.Transparency = 0.55
+ring.Color = AURA_CFG.Color
+ring.CanCollide = false
+ring.Massless = true
+ring.Parent = f
+local weld = Instance.new("Weld")
+weld.Part0 = root
+weld.Part1 = ring
+weld.C0 = CFrame.new(0, -2.8, 0) * CFrame.Angles(0, 0, math.rad(90))
+weld.Parent = ring
+end
+elseif existing then
+existing:Destroy()
+end
+end
+local function setGodLight(enabled)
+local char = player.Character
+local root = char and char:FindFirstChild("HumanoidRootPart")
+local f = getAuraFolder()
+if not root or not f then return end
+local existing = f:FindFirstChild("GodPointLight")
+if enabled then
+if not existing then
+local lt = Instance.new("PointLight")
+lt.Name = "GodPointLight"
+lt.Color = AURA_CFG.Color
+lt.Range = 22
+lt.Brightness = 3
+lt.Parent = root
+end
+elseif existing then
+existing:Destroy()
+end
+end
+local function updateAuraColors()
+local f = player.Character and player.Character:FindFirstChild(AURA_CFG.FolderName)
+if not f then return end
+for _, desc in ipairs(f:GetDescendants()) do
+if desc:IsA("Highlight") then
+desc.FillColor = AURA_CFG.Color
+desc.OutlineColor = AURA_CFG.SecondaryColor
+elseif desc:IsA("ParticleEmitter") then
+desc.Color = ColorSequence.new(AURA_CFG.Color, AURA_CFG.SecondaryColor)
+elseif desc:IsA("BasePart") then
+desc.Color = AURA_CFG.Color
+elseif desc:IsA("PointLight") then
+desc.Color = AURA_CFG.Color
+elseif desc:IsA("Trail") then
+desc.Color = ColorSequence.new(AURA_CFG.Color, AURA_CFG.SecondaryColor)
+end
+end
+end
+-- ==========================================
+-- BUILD ALL 6 TABS (Home Open by Default so you see the Auras!)
+-- ==========================================
+local homeTab, selectHome     = createTab("Home", "AURA", "⌂")
+local playerTab, _            = createTab("Player Options", "STATS", "✦")
+local combatTab, _            = createTab("Combat", "FIGHT", "⚔")
+local teleportTab, _          = createTab("Teleports", "WARP", "◈")
+local settingsTab, _          = createTab("Settings", "SYS", "⚙")
+local themeTab, _             = createTab("Theme Studio", "STYLE", "🎨")
+selectHome()
+-- ==========================================
+-- 1. HOME TAB: MASSIVE AVATAR AURA STUDIO
+-- ==========================================
+addSectionHeader(homeTab, "Avatar Aura Effects")
+addToggle(homeTab, "Outline & Body Glow", false, setHighlightAura)
+addToggle(homeTab, "Super Saiyan Ki Flames", false, setKiFlames)
+addToggle(homeTab, "Lightning Bio-Sparks", false, setLightningSparks)
+addToggle(homeTab, "Anime Energy Wings (6 Blades)", false, setEnergyWings)
+addToggle(homeTab, "4 Orbiting Truth-Seeker Orbs", false, setOrbitOrbs)
+addToggle(homeTab, "Divine God Halo", false, setDivineHalo)
+addToggle(homeTab, "Sakura Petal Vortex", false, setSakuraOrbit)
+addToggle(homeTab, "Shadow Monarch Dark Smoke", false, setShadowSmoke)
+addToggle(homeTab, "Speed & Hand Neon Trails", false, setBodyTrails)
+addToggle(homeTab, "Ground Chakra Ring", false, setGroundRing)
+addToggle(homeTab, "God Aura World Light", false, setGodLight)
+addSectionHeader(homeTab, "Aura Color & Animation")
+addSlider(homeTab, "Aura Primary Hue", 0, 360, 348, function(deg)
+AURA_CFG.Color = Color3.fromHSV(deg / 360, 0.9, 1)
+updateAuraColors()
+end)
+addSlider(homeTab, "Aura Secondary Hue", 0, 360, 202, function(deg)
+AURA_CFG.SecondaryColor = Color3.fromHSV(deg / 360, 0.9, 1)
+updateAuraColors()
+end)
+addToggle(homeTab, "Rainbow RGB Aura Cycle", false, function(v) AURA_CFG.Rainbow = v end)
+addToggle(homeTab, "Breathing Pulse Aura", false, function(v) AURA_CFG.Pulse = v end)
+addActionButton(homeTab, "ACTIVATE ALL AURAS (GOD MODE)", function()
+setHighlightAura(true)
+setKiFlames(true)
+setLightningSparks(true)
+setEnergyWings(true)
+setOrbitOrbs(true)
+setDivineHalo(true)
+setBodyTrails(true)
+setGroundRing(true)
+setGodLight(true)
+end)
+addActionButton(homeTab, "Clear All Avatar Auras", clearAllAuras)
+-- ==========================================
+-- 2. PLAYER OPTIONS TAB
+-- ==========================================
+addSlider(playerTab, "WalkSpeed", 16, 150, 32, function(value)
+local hum = player.Character and player.Character:FindFirstChild("Humanoid")
+if hum then hum.WalkSpeed = value end
+end)
+addSlider(playerTab, "JumpPower", 50, 250, 50, function(value)
+local hum = player.Character and player.Character:FindFirstChild("Humanoid")
+if hum then hum.UseJumpPower = true hum.JumpPower = value end
+end)
+local infJumpEnabled = false
+UserInputService.JumpRequest:Connect(function()
+if infJumpEnabled then
+local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+end
+end)
+addToggle(playerTab, "Infinite Jump", false, function(enabled) infJumpEnabled = enabled end)
+local noclipEnabled = false
+RunService.Stepped:Connect(function()
+if noclipEnabled and player.Character then
+for _, part in ipairs(player.Character:GetDescendants()) do
+if part:IsA("BasePart") then part.CanCollide = false end
+end
+end
+end)
+addToggle(playerTab, "Noclip", false, function(enabled) noclipEnabled = enabled end)
+addActionButton(playerTab, "Teleport to Spawn", function()
+local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+local spawnLoc = workspace:FindFirstChildOfClass("SpawnLocation")
+if root then
+root.CFrame = spawnLoc and (spawnLoc.CFrame + Vector3.new(0, 4, 0)) or CFrame.new(0, 10, 0)
+end
+end)
+-- ==========================================
+-- 3. COMBAT TAB
+-- ==========================================
+addToggle(combatTab, "Flash Step (Q Dash)", false, function(enabled) _G.NexusFlashStep = enabled end)
+UserInputService.InputBegan:Connect(function(input, gp)
+if not gp and _G.NexusFlashStep and input.KeyCode == Enum.KeyCode.Q then
+local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+if root then root.CFrame = root.CFrame * CFrame.new(0, 0, -22) end
+end
+end)
+addActionButton(combatTab, "Full Heal Character", function()
+local hum = player.Character and player.Character:FindFirstChild("Humanoid")
+if hum then hum.Health = hum.MaxHealth end
+end)
+-- ==========================================
+-- 4. TELEPORTS TAB
+-- ==========================================
+addActionButton(teleportTab, "Teleport to Spawn", function()
+local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+local spawnLoc = workspace:FindFirstChildOfClass("SpawnLocation")
+if root then
+root.CFrame = spawnLoc and (spawnLoc.CFrame + Vector3.new(0, 4, 0)) or CFrame.new(0, 10, 0)
+end
+end)
+addActionButton(teleportTab, "Teleport High Sky", function()
+local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+if root then root.CFrame = root.CFrame + Vector3.new(0, 120, 0) end
+end)
+-- ==========================================
+-- 5. SETTINGS TAB
+-- ==========================================
+addActionButton(settingsTab, "Reset Character", function()
+local hum = player.Character and player.Character:FindFirstChild("Humanoid")
+if hum then hum.Health = 0 end
+end)
+addActionButton(settingsTab, "Destroy Hub UI", function() screenGui:Destroy() end)
+-- ==========================================
+-- 6. THEME STUDIO TAB (Expanded Colors, Fonts, FX & Layout!)
+-- ==========================================
+addSectionHeader(themeTab, "Color Themes & Presets")
+local presetIdx = 1
+addActionButton(themeTab, "Preset: Crimson & Azure", function(btn)
+presetIdx = (presetIdx % #PRESETS) + 1
+local p = PRESETS[presetIdx]
+THEME.Primary = p.Pri
+THEME.Secondary = p.Sec
+THEME.BgDark = p.Bg
+THEME.RowBg = p.Row
+THEME.PanelBg = Color3.new(math.min(p.Bg.R + 0.03, 1), math.min(p.Bg.G + 0.03, 1), math.min(p.Bg.B + 0.05, 1))
+btn.Text = "Preset: " .. p.Name
+applyTheme()
+end)
+addActionButton(themeTab, "Swap Primary & Secondary Colors", function()
+THEME.Primary, THEME.Secondary = THEME.Secondary, THEME.Primary
+applyTheme()
+end)
+addActionButton(themeTab, "Randomize Neon Theme", function()
+local h1 = math.random()
+local h2 = (h1 + 0.45) % 1
+THEME.Primary = Color3.fromHSV(h1, 0.9, 1)
+THEME.Secondary = Color3.fromHSV(h2, 0.9, 1)
+applyTheme()
+end)
+addSlider(themeTab, "Primary Hue", 0, 360, 348, function(deg)
+THEME.Primary = Color3.fromHSV(deg / 360, 0.88, 1)
+applyTheme()
+end)
+addSlider(themeTab, "Secondary Hue", 0, 360, 202, function(deg)
+THEME.Secondary = Color3.fromHSV(deg / 360, 0.88, 1)
+applyTheme()
+end)
+addSlider(themeTab, "Background Darkness", 0, 100, 8, function(val)
+local v = (val / 100) * 0.25
+THEME.BgDark = Color3.new(v, v, v * 1.3)
+THEME.PanelBg = Color3.new(v + 0.03, v + 0.03, v * 1.3 + 0.05)
+THEME.RowBg = Color3.new(v + 0.06, v + 0.06, v * 1.3 + 0.09)
+applyTheme()
+end)
+addToggle(themeTab, "RGB Rainbow Hub Mode", false, function(v) THEME.RainbowMode = v end)
+addSectionHeader(themeTab,
+"Typography & Visual Effects")
+local fontIdx = 1
+addActionButton(themeTab, "Font Style: Modern Gotham", function(btn)
+fontIdx = (fontIdx % #FONT_STYLES) + 1
+local f = FONT_STYLES[fontIdx]
+THEME.CurrentFont = f.Bold
+THEME.HeaderFont = f.Black
+btn.Text = "Font Style: " .. f.Name
+applyTheme()
+end)
+addSlider(themeTab, "Neon Spin Speed", 0, 300, 65, function(spd)
+THEME.SpinSpeed = spd
+end)
+addSlider(themeTab, "Energy Spark Density", 0, 35, 16, function(cnt)
+THEME.SparkCount = cnt
+applyTheme()
+end)
+addSlider(themeTab, "Anime BG Visibility %", 0, 100, 55, function(vis)
+animeBgImage.ImageTransparency = 1 - (vis / 100)
+end)
+addToggle(themeTab, "Show Corner Anime Mascot", true, function(v)
+THEME.ShowMascot = v
+applyTheme()
+end)
+addToggle(themeTab, "Spinning Neon Border", true, function(spin) THEME.SpinBorder = spin end)
+addToggle(themeTab, "Floating Energy Sparks", true, function(sparks)
+THEME.ShowSparks = sparks
+applyTheme()
+end)
+addSectionHeader(themeTab, "Layout & Window Geometry")
+addSlider(themeTab, "Hub Width", 360, 680, 440, function(w)
+mainFrame.Size = UDim2.new(0, w, 0, mainFrame.Size.Y.Offset)
+end)
+addSlider(themeTab, "Hub Height", 220, 440, 270, function(h)
+mainFrame.Size = UDim2.new(0, mainFrame.Size.X.Offset, 0, h)
+end)
+addSlider(themeTab, "UI Zoom Scale %", 60, 140, 100, function(sc)
+uiScale.Scale = sc / 100
+end)
+addSlider(themeTab, "Corner Roundness", 0, 24, 10, function(rad)
+THEME.CornerRad = rad
+applyTheme()
+end)
+addSlider(themeTab, "Border Thickness", 0, 6, 2, function(thick)
+THEME.BorderThick = thick
+applyTheme()
+end)
+addSlider(themeTab, "Glass Opacity %", 0, 80, 5, function(pct)
+THEME.BgOpacity = pct / 100
+applyTheme()
+end)
+addToggle(themeTab, "Sidebar on Right Side", false, function(isRight)
+THEME.SidebarRight = isRight
+applyTheme()
+end)
+addActionButton(themeTab, "Reset Layout & Default Theme", function()
+THEME.Primary = Color3.fromRGB(255, 35, 75)
+THEME.Secondary = Color3.fromRGB(30, 175, 255)
+THEME.BgDark = Color3.fromRGB(10, 12, 20)
+THEME.PanelBg = Color3.fromRGB(16, 20, 32)
+THEME.RowBg = Color3.fromRGB(22, 27, 44)
+THEME.CornerRad = 10
+THEME.BorderThick = 2.5
+THEME.BgOpacity = 0.05
+THEME.SidebarRight = false
+THEME.RainbowMode = false
+THEME.CurrentFont = Enum.Font.GothamBold
+THEME.HeaderFont = Enum.Font.GothamBlack
+mainFrame.Size = UDim2.new(0, 440, 0, 270)
+mainFrame.Position = UDim2.new(0.5, -220, 0.5, -135)
+uiScale.Scale = 1
+applyTheme()
+end)
+applyTheme()
+-- ==========================================
+-- LIVE ANIMATION LOOP (UI + Orbiting Orbs + Rainbow/Pulse Auras)
+-- ==========================================
+local rot = 0
+local orbAngle = 0
+RunService.RenderStepped:Connect(function(dt)
+if not screenGui.Parent then return end
+-- 1. UI Border Spin & Rainbow Mode
+if THEME.SpinBorder then
+rot = (rot + dt * THEME.SpinSpeed) % 360
+outerGrad.Rotation = rot
+end
+if THEME.RainbowMode then
+local h = (tick() * 0.25) % 1
+THEME.Primary = Color3.fromHSV(h, 0.9, 1)
+THEME.Secondary = Color3.fromHSV((h + 0.5) % 1, 0.9, 1)
+applyTheme()
+end
+reopenStroke.Color = (math.sin(tick() * 3) > 0) and THEME.Secondary or THEME.Primary
+-- 2. Floating Hub Sparks
+if THEME.ShowSparks then
+for _, p in ipairs(REG.Particles) do
+if p.obj.Visible then
+local pos = p.obj.Position
+local newY = pos.Y.Scale - p.speedY * dt
+local newX = pos.X.Scale + p.speedX * dt
+if newY < -0.05 then newY = 1.05 end
+if newX > 1.05 then newX = -0.05 elseif newX < -0.05 then newX = 1.05 end
+p.obj.Position = UDim2.new(newX, 0, newY, 0)
+p.obj.Rotation = (p.obj.Rotation + p.rotSpeed * dt) % 360
+end
+end
+end
+-- 3. Avatar Aura Live Animations (Orbiting Orbs + Rainbow + Breathing Pulse)
+local char = player.Character
+local root = char and char:FindFirstChild("HumanoidRootPart")
+local auraFolder = char and char:FindFirstChild(AURA_CFG.FolderName)
+if auraFolder then
+if AURA_CFG.Rainbow then
+local ah = (tick() * 0.4) % 1
+AURA_CFG.Color = Color3.fromHSV(ah, 0.95, 1)
+AURA_CFG.SecondaryColor = Color3.fromHSV((ah + 0.45) % 1, 0.95, 1)
+updateAuraColors()
+end
+if AURA_CFG.Pulse then
+local hl = auraFolder:FindFirstChild("AuraHighlight")
+if hl then
+hl.FillTransparency = 0.5 + math.sin(tick() * 5) * 0.35
+end
+end
+local orbs = auraFolder:FindFirstChild("OrbitOrbs")
+if orbs and root then
+orbAngle = orbAngle + dt * 3.5
+for i = 1, 4 do
+local orb = orbs:FindFirstChild("Orb" .. i)
+if orb then
+local angle = orbAngle + (i * (math.pi / 2))
+local offset = Vector3.new(math.cos(angle) * 3.5, math.sin(orbAngle * 2 + i) * 0.8, math.sin(angle) * 3.5)
+orb.CFrame = CFrame.new(root.Position + offset)
+end
+end
+end
+end
+end)
