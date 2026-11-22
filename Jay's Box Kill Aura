@@ -4,7 +4,7 @@
 
 local CONFIG = {
 	BoxSize = 50,                    -- studs, the box is this long on every side
-	MaxBoxSize = 250,                -- <<< biggest box size you can set (0 to this number)
+	MaxBoxSize = 2500,                -- <<< biggest box size you can set (0 to this number)
 	Speed = 100,                     -- 0 to 100. 100 = fastest (no delay at all), 0 = slowest
 	MaxSpeed = 100,                  -- top of the speed range (100 = fastest)
 	BoxVisibility = 0.7,             -- 0 = box invisible, 1 = box fully visible (the slider changes this)
