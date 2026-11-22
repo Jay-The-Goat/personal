@@ -581,12 +581,12 @@ ToggleButton.MouseButton1Click:Connect(toggleActive)
 ModeButton.MouseButton1Click:Connect(cycleMode)
 
 apsMinus.MouseButton1Click:Connect(function()
-	APS = math.clamp(APS - 5, 10, 100)
+	APS = math.clamp(APS - 5, 10, 100,150,200,250,300)
 	apsVal.Text = tostring(APS)
 end)
 
 apsPlus.MouseButton1Click:Connect(function()
-	APS = math.clamp(APS + 5, 10, 100)
+	APS = math.clamp(APS + 5, 10, 100,150,200,250,300)
 	apsVal.Text = tostring(APS)
 end)
 
