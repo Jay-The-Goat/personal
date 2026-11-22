@@ -1,820 +1,1033 @@
-local Config = {
-	BoxSize = 50,
-	MaxBoxSize = 250,
-	Speed = 100,
-	MaxSpeed = 100,
-	BoxVisibility = 0.7,
-	EquipAll = false,
-	ToggleKey = Enum.KeyCode.K
+-- Azan kill aura
+-- this script was made by Azan
+-- A box shows around you. Anyone who steps inside the box gets hit by the tools you picked.
+
+local CONFIG = {
+	BoxSize = 50,                    -- studs, the box is this long on every side
+	MaxBoxSize = 250,                -- <<< biggest box size you can set (0 to this number)
+	Speed = 100,                     -- 0 to 100. 100 = fastest (no delay at all), 0 = slowest
+	MaxSpeed = 100,                  -- top of the speed range (100 = fastest)
+	BoxVisibility = 0.7,             -- 0 = box invisible, 1 = box fully visible (the slider changes this)
+	EquipAll = false,                -- true = equip every tool at once and hit with all of them
+	ToggleKey = Enum.KeyCode.K,      -- <<< CHANGE THE KEYBIND HERE (PC only, turns the aura on/off)
 }
 
-local BaseDelay = 1
+-- Seconds of waiting between hits when Speed is 0. The wait shrinks as Speed goes up
+-- and is gone completely at Speed 100 (equip + use tools happen every frame, no delay).
+local SLOWEST_DELAY = 1
+
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
-local LocalPlayer = Players.LocalPlayer
 
-local SharedEnv = getgenv and getgenv() or _G
-if SharedEnv.__AzanKillAuraCleanup then
-	pcall(SharedEnv.__AzanKillAuraCleanup)
-	SharedEnv.__AzanKillAuraCleanup = nil
+local player = Players.LocalPlayer
+local env = (getgenv and getgenv()) or _G
+
+-- remove the old copy if you execute this twice
+if env.__AzanKillAuraCleanup then
+	pcall(env.__AzanKillAuraCleanup)
+	env.__AzanKillAuraCleanup = nil
 end
 
-local Connections = {}
-local function TrackConnection(conn)
-	table.insert(Connections, conn)
-	return conn
+local connections = {}
+local function track(c)
+	table.insert(connections, c)
+	return c
 end
 
-local Enabled = false
-local Running = true
+local enabled = false
+local running = true
 
-local function WaitSeconds(duration)
+-- Own wait function. The no cool down script hooks task.wait and makes every wait last
+-- one frame, which would ignore the speed setting. Heartbeat:Wait() is not hooked.
+local function waitDelay(seconds)
 	local start = os.clock()
 	repeat
 		RunService.Heartbeat:Wait()
-	until os.clock() - start >= duration
+	until os.clock() - start >= seconds
 end
 
-local function GetLoopDelay()
-	local ratio = (Config.MaxSpeed - Config.Speed) / Config.MaxSpeed
-	return math.max(ratio, 0) * BaseDelay
+-- delay between hits from the Speed setting (0 at Speed 100)
+local function getDelay()
+	local ratio = (CONFIG.MaxSpeed - CONFIG.Speed) / CONFIG.MaxSpeed
+	return math.max(ratio, 0) * SLOWEST_DELAY
 end
 
-local ProtectedPlayers = {}
-local SelectedTools = {}
+local protected = {} -- player NAMES that the aura will never hit (kept after they respawn)
+local selected = {} -- tool NAMES (so it still works after you respawn and the tools are new)
 
-local Theme = {
-	Window = Color3.fromRGB(20, 8, 29),
+local THEME = {
+	Window = Color3.fromRGB(20, 8, 10),
 	Panel = Color3.fromRGB(36, 12, 15),
 	Button = Color3.fromRGB(52, 16, 20),
 	Edge = Color3.fromRGB(150, 25, 30),
 	Text = Color3.fromRGB(240, 232, 232),
 	SubText = Color3.fromRGB(170, 140, 140),
 	Off = Color3.fromRGB(170, 30, 30),
-	On = Color3.fromRGB(40, 170, 70)
+	On = Color3.fromRGB(40, 170, 70),
 }
 
-local function GetGuiParent()
+------------------------------------------------------------------
+-- GUI helpers
+------------------------------------------------------------------
+local function getGuiParent()
 	if gethui then
-		local ok, hui = pcall(gethui)
-		if ok and hui then return hui end
+		local ok, result = pcall(gethui)
+		if ok and result then
+			return result
+		end
 	end
-	local ok, coreGui = pcall(function() return game:GetService("CoreGui") end)
-	if ok and coreGui then return coreGui end
-	return LocalPlayer:WaitForChild("PlayerGui")
+	local ok, coreGui = pcall(function()
+		return game:GetService("CoreGui")
+	end)
+	if ok and coreGui then
+		return coreGui
+	end
+	return player:WaitForChild("PlayerGui")
 end
 
-local function Create(className, props, parent)
-	local inst = Instance.new(className)
+local function new(class, props, parent)
+	local obj = Instance.new(class)
 	for k, v in pairs(props) do
-		inst[k] = v
+		obj[k] = v
 	end
-	inst.Parent = parent
-	return inst
+	obj.Parent = parent
+	return obj
 end
 
-local function AddCorner(inst, radius)
-	Create("UICorner", { CornerRadius = UDim.new(0, radius or 3) }, inst)
+local function corner(obj, r)
+	new("UICorner", { CornerRadius = UDim.new(0, r or 3) }, obj)
 end
 
-local function IsPrimaryInput(input)
-	return input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch
+local function isPress(input)
+	return input.UserInputType == Enum.UserInputType.MouseButton1
+		or input.UserInputType == Enum.UserInputType.Touch
 end
 
-local function IsMoveInput(input)
-	return input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch
+local function isMove(input)
+	return input.UserInputType == Enum.UserInputType.MouseMovement
+		or input.UserInputType == Enum.UserInputType.Touch
 end
 
-local function MakeDraggable(handle, target, onClick)
+-- drag with mouse or finger. onTap only fires if it was not dragged.
+local function makeDraggable(handle, target, onTap)
 	local dragging, moved = false, false
-	local startPos, startInput = nil, nil
+	local startPos, startInput
 
-	TrackConnection(handle.InputBegan:Connect(function(input)
-		if IsPrimaryInput(input) then
+	track(handle.InputBegan:Connect(function(input)
+		if isPress(input) then
 			dragging, moved = true, false
 			startInput = input.Position
 			startPos = target.Position
 		end
 	end))
 
-	TrackConnection(UserInputService.InputChanged:Connect(function(input)
-		if dragging and IsMoveInput(input) then
+	track(UserInputService.InputChanged:Connect(function(input)
+		if dragging and isMove(input) then
 			local delta = input.Position - startInput
-			if delta.Magnitude > 6 then moved = true end
+			if delta.Magnitude > 6 then
+				moved = true
+			end
 			if moved then
-				target.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+				target.Position = UDim2.new(
+					startPos.X.Scale, startPos.X.Offset + delta.X,
+					startPos.Y.Scale, startPos.Y.Offset + delta.Y
+				)
 			end
 		end
 	end))
 
-	TrackConnection(UserInputService.InputEnded:Connect(function(input)
-		if dragging and IsPrimaryInput(input) then
+	track(UserInputService.InputEnded:Connect(function(input)
+		if dragging and isPress(input) then
 			dragging = false
-			if not moved and onClick then onClick() end
+			if not moved and onTap then
+				onTap()
+			end
 		end
 	end))
 end
 
--- GUI Setup
-local ScreenGui = Create("ScreenGui", {
+------------------------------------------------------------------
+-- GUI
+------------------------------------------------------------------
+local gui = new("ScreenGui", {
 	Name = "Azan kill aura",
-	ResetOnSpawn = false,
-	ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	ResetOnSpawn = false, -- the GUI stays when you die
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 }, nil)
-ScreenGui.Parent = GetGuiParent()
+gui.Parent = getGuiParent()
 
-local MainFrame = Create("Frame", {
+local window = new("Frame", {
 	Size = UDim2.fromOffset(240, 340),
 	Position = UDim2.new(0.5, -120, 0.5, -170),
-	BackgroundColor3 = Theme.Window,
-	BorderSizePixel = 0
-}, ScreenGui)
-AddCorner(MainFrame, 4)
-Create("UIStroke", { Color = Theme.Edge, Thickness = 1.5 }, MainFrame)
+	BackgroundColor3 = THEME.Window,
+	BorderSizePixel = 0,
+}, gui)
+corner(window, 4)
+new("UIStroke", { Color = THEME.Edge, Thickness = 1.5 }, window)
 
-local TopBar = Create("TextLabel", {
+local title = new("TextLabel", {
 	Size = UDim2.new(1, 0, 0, 30),
-	BackgroundColor3 = Theme.Panel,
+	BackgroundColor3 = THEME.Panel,
 	BorderSizePixel = 0,
 	Text = "  Azan kill aura",
-	TextColor3 = Theme.Text,
+	TextColor3 = THEME.Text,
 	TextXAlignment = Enum.TextXAlignment.Left,
 	Font = Enum.Font.GothamBold,
-	TextSize = 14
-}, MainFrame)
-AddCorner(TopBar, 4)
+	TextSize = 14,
+}, window)
+corner(title, 4)
 
-Create("TextLabel", {
+new("TextLabel", {
 	Size = UDim2.new(1, -16, 0, 16),
 	Position = UDim2.fromOffset(8, 34),
 	BackgroundTransparency = 1,
 	Text = "this script was made by Azan",
-	TextColor3 = Theme.SubText,
+	TextColor3 = THEME.SubText,
 	TextXAlignment = Enum.TextXAlignment.Left,
 	Font = Enum.Font.Gotham,
-	TextSize = 11
-}, MainFrame)
+	TextSize = 11,
+}, window)
 
-local ToggleBtn = Create("TextButton", {
+local toggleBtn = new("TextButton", {
 	Size = UDim2.new(1, -16, 0, 34),
 	Position = UDim2.fromOffset(8, 54),
-	BackgroundColor3 = Theme.Off,
+	BackgroundColor3 = THEME.Off,
 	BorderSizePixel = 0,
 	Text = "Kill Aura: OFF",
 	TextColor3 = Color3.new(1, 1, 1),
 	Font = Enum.Font.GothamBold,
-	TextSize = 14
-}, MainFrame)
-AddCorner(ToggleBtn)
+	TextSize = 14,
+}, window)
+corner(toggleBtn)
 
-local ToolsDropdownBtn = Create("TextButton", {
+local dropBtn = new("TextButton", {
 	Size = UDim2.new(1, -16, 0, 28),
 	Position = UDim2.fromOffset(8, 96),
-	BackgroundColor3 = Theme.Button,
+	BackgroundColor3 = THEME.Button,
 	BorderSizePixel = 0,
 	Text = "Tools: none selected  v",
-	TextColor3 = Theme.Text,
+	TextColor3 = THEME.Text,
 	Font = Enum.Font.Gotham,
-	TextSize = 13
-}, MainFrame)
-AddCorner(ToolsDropdownBtn)
-Create("UIStroke", { Color = Theme.Edge, Thickness = 1, Transparency = 0.4 }, ToolsDropdownBtn)
+	TextSize = 13,
+}, window)
+corner(dropBtn)
+new("UIStroke", { Color = THEME.Edge, Thickness = 1, Transparency = 0.4 }, dropBtn)
 
-Create("TextLabel", {
+new("TextLabel", {
 	Size = UDim2.fromOffset(70, 26),
 	Position = UDim2.fromOffset(8, 166),
 	BackgroundTransparency = 1,
 	Text = "Box size",
-	TextColor3 = Theme.Text,
+	TextColor3 = THEME.Text,
 	TextXAlignment = Enum.TextXAlignment.Left,
 	Font = Enum.Font.Gotham,
-	TextSize = 13
-}, MainFrame)
+	TextSize = 13,
+}, window)
 
-local BoxSizeInput = Create("TextBox", {
+local sizeBox = new("TextBox", {
 	Size = UDim2.fromOffset(60, 26),
 	Position = UDim2.fromOffset(80, 166),
-	BackgroundColor3 = Theme.Button,
+	BackgroundColor3 = THEME.Button,
 	BorderSizePixel = 0,
-	Text = tostring(Config.BoxSize),
-	TextColor3 = Theme.Text,
+	Text = tostring(CONFIG.BoxSize),
+	TextColor3 = THEME.Text,
 	Font = Enum.Font.Gotham,
 	TextSize = 13,
-	ClearTextOnFocus = false
-}, MainFrame)
-AddCorner(BoxSizeInput)
+	ClearTextOnFocus = false,
+}, window)
+corner(sizeBox)
 
-Create("TextLabel", {
+-- speed:  [ - ]  100  [ + ]   (0 to 100, 100 = fastest)
+new("TextLabel", {
 	Size = UDim2.fromOffset(80, 26),
 	Position = UDim2.fromOffset(8, 200),
 	BackgroundTransparency = 1,
 	Text = "Speed",
-	TextColor3 = Theme.Text,
+	TextColor3 = THEME.Text,
 	TextXAlignment = Enum.TextXAlignment.Left,
 	Font = Enum.Font.Gotham,
-	TextSize = 13
-}, MainFrame)
+	TextSize = 13,
+}, window)
 
-local SpeedMinusBtn = Create("TextButton", {
+local minusBtn = new("TextButton", {
 	Size = UDim2.fromOffset(36, 26),
 	Position = UDim2.fromOffset(100, 200),
-	BackgroundColor3 = Theme.Button,
+	BackgroundColor3 = THEME.Button,
 	BorderSizePixel = 0,
 	Text = "-",
-	TextColor3 = Theme.Text,
+	TextColor3 = THEME.Text,
 	Font = Enum.Font.GothamBold,
-	TextSize = 18
-}, MainFrame)
-AddCorner(SpeedMinusBtn)
+	TextSize = 18,
+}, window)
+corner(minusBtn)
 
-local SpeedValueLabel = Create("TextLabel", {
+local speedValue = new("TextLabel", {
 	Size = UDim2.fromOffset(48, 26),
 	Position = UDim2.fromOffset(140, 200),
 	BackgroundTransparency = 1,
 	Text = "",
-	TextColor3 = Theme.Text,
+	TextColor3 = THEME.Text,
 	Font = Enum.Font.GothamBold,
-	TextSize = 14
-}, MainFrame)
+	TextSize = 14,
+}, window)
 
-local SpeedPlusBtn = Create("TextButton", {
+local plusBtn = new("TextButton", {
 	Size = UDim2.fromOffset(36, 26),
 	Position = UDim2.fromOffset(192, 200),
-	BackgroundColor3 = Theme.Button,
+	BackgroundColor3 = THEME.Button,
 	BorderSizePixel = 0,
 	Text = "+",
-	TextColor3 = Theme.Text,
+	TextColor3 = THEME.Text,
 	Font = Enum.Font.GothamBold,
-	TextSize = 18
-}, MainFrame)
-AddCorner(SpeedPlusBtn)
+	TextSize = 18,
+}, window)
+corner(plusBtn)
 
-local EquipAllBtn = Create("TextButton", {
+local equipBtn = new("TextButton", {
 	Size = UDim2.new(1, -16, 0, 26),
 	Position = UDim2.fromOffset(8, 232),
-	BackgroundColor3 = Theme.Button,
+	BackgroundColor3 = THEME.Button,
 	BorderSizePixel = 0,
 	Text = "",
-	TextColor3 = Theme.Text,
+	TextColor3 = THEME.Text,
 	Font = Enum.Font.Gotham,
-	TextSize = 13
-}, MainFrame)
-AddCorner(EquipAllBtn)
+	TextSize = 13,
+}, window)
+corner(equipBtn)
 
-local VisibilityLabel = Create("TextLabel", {
+-- box visibility slider (left = invisible, right = fully visible)
+local sliderLabel = new("TextLabel", {
 	Size = UDim2.new(1, -16, 0, 18),
 	Position = UDim2.fromOffset(8, 262),
 	BackgroundTransparency = 1,
 	Text = "",
-	TextColor3 = Theme.Text,
+	TextColor3 = THEME.Text,
 	TextXAlignment = Enum.TextXAlignment.Left,
 	Font = Enum.Font.Gotham,
-	TextSize = 12
-}, MainFrame)
+	TextSize = 12,
+}, window)
 
-local SliderTrack = Create("TextButton", {
+local sliderTrack = new("TextButton", {
 	Size = UDim2.new(1, -16, 0, 14),
 	Position = UDim2.fromOffset(8, 286),
-	BackgroundColor3 = Theme.Button,
+	BackgroundColor3 = THEME.Button,
 	BorderSizePixel = 0,
 	Text = "",
-	AutoButtonColor = false
-}, MainFrame)
-AddCorner(SliderTrack, 7)
+	AutoButtonColor = false,
+}, window)
+corner(sliderTrack, 7)
 
-local SliderFill = Create("Frame", {
-	Size = UDim2.fromScale(Config.BoxVisibility, 1),
-	BackgroundColor3 = Theme.Edge,
-	BorderSizePixel = 0
-}, SliderTrack)
-AddCorner(SliderFill, 7)
+local sliderFill = new("Frame", {
+	Size = UDim2.fromScale(CONFIG.BoxVisibility, 1),
+	BackgroundColor3 = THEME.Edge,
+	BorderSizePixel = 0,
+}, sliderTrack)
+corner(sliderFill, 7)
 
-local SliderKnob = Create("Frame", {
+local sliderKnob = new("Frame", {
 	Size = UDim2.fromOffset(18, 18),
 	AnchorPoint = Vector2.new(0.5, 0.5),
-	Position = UDim2.new(Config.BoxVisibility, 0, 0.5, 0),
-	BackgroundColor3 = Theme.Text,
-	BorderSizePixel = 0
-}, SliderTrack)
-AddCorner(SliderKnob, 9)
+	Position = UDim2.new(CONFIG.BoxVisibility, 0, 0.5, 0),
+	BackgroundColor3 = THEME.Text,
+	BorderSizePixel = 0,
+}, sliderTrack)
+corner(sliderKnob, 9)
 
-local CloseBtn = Create("TextButton", {
+local closeBtn = new("TextButton", {
 	Size = UDim2.fromOffset(24, 20),
 	Position = UDim2.new(1, -28, 0, 5),
-	BackgroundColor3 = Theme.Button,
+	BackgroundColor3 = THEME.Button,
 	BorderSizePixel = 0,
 	Text = "X",
-	TextColor3 = Theme.Text,
+	TextColor3 = THEME.Text,
 	Font = Enum.Font.GothamBold,
-	TextSize = 12
-}, TopBar)
-AddCorner(CloseBtn)
+	TextSize = 12,
+}, title)
+corner(closeBtn)
 
-local StatusLabel = Create("TextLabel", {
+-- status line: shows what the aura sees, so you can tell what is going wrong
+local statusLabel = new("TextLabel", {
 	Size = UDim2.new(1, -16, 0, 18),
 	Position = UDim2.fromOffset(8, 310),
 	BackgroundTransparency = 1,
 	Text = "aura off",
-	TextColor3 = Theme.SubText,
+	TextColor3 = THEME.SubText,
 	TextXAlignment = Enum.TextXAlignment.Left,
 	Font = Enum.Font.Gotham,
-	TextSize = 11
-}, MainFrame)
+	TextSize = 11,
+}, window)
 
-local ToolsListFrame = Create("ScrollingFrame", {
+-- dropdown list (sits on top of the rows below the dropdown button)
+local dropList = new("ScrollingFrame", {
 	Size = UDim2.new(1, -16, 0, 110),
 	Position = UDim2.fromOffset(8, 126),
-	BackgroundColor3 = Theme.Panel,
+	BackgroundColor3 = THEME.Panel,
 	BorderSizePixel = 0,
 	ScrollBarThickness = 3,
 	CanvasSize = UDim2.new(0, 0, 0, 0),
 	AutomaticCanvasSize = Enum.AutomaticSize.Y,
 	Visible = false,
-	ZIndex = 10
-}, MainFrame)
-AddCorner(ToolsListFrame)
-Create("UIStroke", { Color = Theme.Edge, Thickness = 1 }, ToolsListFrame)
-Create("UIListLayout", { Padding = UDim.new(0, 3), SortOrder = Enum.SortOrder.LayoutOrder }, ToolsListFrame)
-Create("UIPadding", { PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4), PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 4) }, ToolsListFrame)
+	ZIndex = 10,
+}, window)
+corner(dropList)
+new("UIStroke", { Color = THEME.Edge, Thickness = 1 }, dropList)
+new("UIListLayout", { Padding = UDim.new(0, 3), SortOrder = Enum.SortOrder.LayoutOrder }, dropList)
+new("UIPadding", {
+	PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4),
+	PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 4),
+}, dropList)
 
-local ProtectDropdownBtn = Create("TextButton", {
+-- protect list (players the aura will NOT hit) + refresh button
+local protectBtn = new("TextButton", {
 	Size = UDim2.fromOffset(156, 28),
 	Position = UDim2.fromOffset(8, 132),
-	BackgroundColor3 = Theme.Button,
+	BackgroundColor3 = THEME.Button,
 	BorderSizePixel = 0,
 	Text = "Protect: none  v",
-	TextColor3 = Theme.Text,
+	TextColor3 = THEME.Text,
 	Font = Enum.Font.Gotham,
-	TextSize = 13
-}, MainFrame)
-AddCorner(ProtectDropdownBtn)
-Create("UIStroke", { Color = Theme.Edge, Thickness = 1, Transparency = 0.4 }, ProtectDropdownBtn)
+	TextSize = 13,
+}, window)
+corner(protectBtn)
+new("UIStroke", { Color = THEME.Edge, Thickness = 1, Transparency = 0.4 }, protectBtn)
 
-local RefreshBtn = Create("TextButton", {
+local refreshBtn = new("TextButton", {
 	Size = UDim2.fromOffset(60, 28),
 	Position = UDim2.fromOffset(172, 132),
-	BackgroundColor3 = Theme.Edge,
+	BackgroundColor3 = THEME.Edge,
 	BorderSizePixel = 0,
 	Text = "Refresh",
-	TextColor3 = Theme.Text,
+	TextColor3 = THEME.Text,
 	Font = Enum.Font.GothamBold,
-	TextSize = 12
-}, MainFrame)
-AddCorner(RefreshBtn)
-local ProtectListFrame = Create("ScrollingFrame", {
-Size = UDim2.new(1, -16, 0, 110),
-Position = UDim2.fromOffset(8, 162),
-BackgroundColor3 = Theme.Panel,
-BorderSizePixel = 0,
-ScrollBarThickness = 3,
-CanvasSize = UDim2.new(0, 0, 0, 0),
-AutomaticCanvasSize = Enum.AutomaticSize.Y,
-Visible = false,
-ZIndex = 10
-}, MainFrame)
-AddCorner(ProtectListFrame)
-Create("UIStroke", { Color = Theme.Edge, Thickness = 1 }, ProtectListFrame)
-Create("UIListLayout", { Padding = UDim.new(0, 3), SortOrder = Enum.SortOrder.LayoutOrder }, ProtectListFrame)
-Create("UIPadding", { PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4), PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 4) }, ProtectListFrame)
-local FloatingBtn = Create("TextButton", {
-Size = UDim2.fromOffset(48, 48),
-Position = UDim2.new(0, 10, 0.5, -24),
-BackgroundColor3 = Theme.Panel,
-BorderSizePixel = 0,
-Text = "KA",
-TextColor3 = Theme.Off,
-Font = Enum.Font.GothamBold,
-TextSize = 16,
-AutoButtonColor = false
-}, ScreenGui)
-AddCorner(FloatingBtn, 4)
-local FloatingStroke = Create("UIStroke", { Color = Theme.Off, Thickness = 1.5 }, FloatingBtn)
-MakeDraggable(TopBar, MainFrame)
-MakeDraggable(FloatingBtn, FloatingBtn, function()
-MainFrame.Visible = not MainFrame.Visible
+	TextSize = 12,
+}, window)
+corner(refreshBtn)
+
+local protectList = new("ScrollingFrame", {
+	Size = UDim2.new(1, -16, 0, 110),
+	Position = UDim2.fromOffset(8, 162),
+	BackgroundColor3 = THEME.Panel,
+	BorderSizePixel = 0,
+	ScrollBarThickness = 3,
+	CanvasSize = UDim2.new(0, 0, 0, 0),
+	AutomaticCanvasSize = Enum.AutomaticSize.Y,
+	Visible = false,
+	ZIndex = 10,
+}, window)
+corner(protectList)
+new("UIStroke", { Color = THEME.Edge, Thickness = 1 }, protectList)
+new("UIListLayout", { Padding = UDim.new(0, 3), SortOrder = Enum.SortOrder.LayoutOrder }, protectList)
+new("UIPadding", {
+	PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4),
+	PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 4),
+}, protectList)
+
+-- floating open/close button (drag it, tap it)
+local openBtn = new("TextButton", {
+	Size = UDim2.fromOffset(48, 48),
+	Position = UDim2.new(0, 10, 0.5, -24),
+	BackgroundColor3 = THEME.Panel,
+	BorderSizePixel = 0,
+	Text = "KA",
+	TextColor3 = THEME.Off,
+	Font = Enum.Font.GothamBold,
+	TextSize = 16,
+	AutoButtonColor = false,
+}, gui)
+corner(openBtn, 4)
+local openStroke = new("UIStroke", { Color = THEME.Off, Thickness = 1.5 }, openBtn)
+
+makeDraggable(title, window)
+makeDraggable(openBtn, openBtn, function()
+	window.Visible = not window.Visible
 end)
-TrackConnection(CloseBtn.MouseButton1Click:Connect(function()
-MainFrame.Visible = false
+
+track(closeBtn.MouseButton1Click:Connect(function()
+	window.Visible = false
 end))
--- UI State & Logic
-local function CountSelectedTools()
-local count = 0
-for _ in pairs(SelectedTools) do
-nn = count + 1 -- Note: Bug in original script (writes to global 'nn' instead of incrementing 'count')
+
+------------------------------------------------------------------
+-- State -> GUI
+------------------------------------------------------------------
+local function selectedCount()
+	local n = 0
+	for _ in pairs(selected) do
+		n += 1
+	end
+	return n
 end
-return count
+
+local function refreshTexts()
+	toggleBtn.Text = "Kill Aura: " .. (enabled and "ON" or "OFF")
+	-- red when off, green when on
+	local color = enabled and THEME.On or THEME.Off
+	toggleBtn.BackgroundColor3 = color
+	openBtn.TextColor3 = color
+	openStroke.Color = color
+
+	local n = selectedCount()
+	local label = CONFIG.EquipAll and "all tools" or (n == 0 and "none selected" or (n .. " selected"))
+	dropBtn.Text = "Tools: " .. label .. (dropList.Visible and "  ^" or "  v")
+	local protectedN = 0
+	for _ in pairs(protected) do
+		protectedN += 1
+	end
+	protectBtn.Text = "Protect: " .. (protectedN == 0 and "none" or (protectedN .. " safe")) .. (protectList.Visible and "  ^" or "  v")
+	speedValue.Text = tostring(CONFIG.Speed)
+	equipBtn.Text = "Equip all tools: " .. (CONFIG.EquipAll and "ON" or "OFF")
+	sliderLabel.Text = "Box visibility: " .. math.floor(CONFIG.BoxVisibility * 100 + 0.5) .. "%"
 end
-local function UpdateUI()
-ToggleBtn.Text = "Kill Aura: " .. (Enabled and "ON" or "OFF")
-local stateColor = Enabled and Theme.On or Theme.Off
-ToggleBtn.BackgroundColor3 = stateColor
-FloatingBtn.TextColor3 = stateColor
-FloatingStroke.Color = stateColor
-local toolCount = CountSelectedTools()
-local toolSummary = Config.EquipAll and "all tools" or (toolCount == 0 and "none selected" or toolCount .. " selected")
-ToolsDropdownBtn.Text = "Tools: " .. toolSummary .. (ToolsListFrame.Visible and "  ^" or "  v")
-local protectCount = 0
-for _ in pairs(ProtectedPlayers) do
-pprotectedN = protectCount + 1 -- Note: Bug in original script (writes to global 'pprotectedN')
+
+local function setEnabled(value)
+	enabled = value
+	refreshTexts()
 end
-ProtectDropdownBtn.Text = "Protect: " .. (protectCount == 0 and "none" or protectCount .. " safe") .. (ProtectListFrame.Visible and "  ^" or "  v")
-SpeedValueLabel.Text = tostring(Config.Speed)
-EquipAllBtn.Text = "Equip all tools: " .. (Config.EquipAll and "ON" or "OFF")
-VisibilityLabel.Text = "Box visibility: " .. math.floor(Config.BoxVisibility * 100 + 0.5) .. "%"
-end
-local function SetEnabled(state)
-Enabled = state
-UpdateUI()
-end
-TrackConnection(ToggleBtn.MouseButton1Click:Connect(function() SetEnabled(not Enabled) end))
-TrackConnection(EquipAllBtn.MouseButton1Click:Connect(function()
-Config.EquipAll = not Config.EquipAll
-UpdateUI()
+
+track(toggleBtn.MouseButton1Click:Connect(function()
+	setEnabled(not enabled)
 end))
--- Speed Controls
-local HoldingSpeed = false
-local HoldToken = 0
-local function AdjustSpeed(delta)
-Config.Speed = math.clamp(Config.Speed + delta, 0, Config.MaxSpeed)
-UpdateUI()
-end
-local function BindHoldButton(btn, delta)
-TrackConnection(btn.InputBegan:Connect(function(input)
-if IsPrimaryInput(input) then
-HoldingSpeed = true
-hholdToken = HoldToken + 1 -- Note: Typo in original script
-local token = HoldToken
-AdjustSpeed(delta)
-task.spawn(function()
-WaitSeconds(0.4)
-while HoldingSpeed and HoldToken == token and Running do
-AdjustSpeed(delta)
-WaitSeconds(0.06)
-end
-end)
-end
+
+track(equipBtn.MouseButton1Click:Connect(function()
+	CONFIG.EquipAll = not CONFIG.EquipAll
+	refreshTexts()
 end))
+
+-- speed - / + buttons: tap = 10 steps, hold to keep going (0 to 100, 100 = fastest)
+local holding = false
+local holdToken = 0
+
+local function changeSpeed(delta)
+	CONFIG.Speed = math.clamp(CONFIG.Speed + delta, 0, CONFIG.MaxSpeed)
+	refreshTexts()
 end
-BindHoldButton(SpeedMinusBtn, -10)
-BindHoldButton(SpeedPlusBtn, 10)
-TrackConnection(UserInputService.InputEnded:Connect(function(input)
-if IsPrimaryInput(input) then HoldingSpeed = false end
+
+local function hookStep(button, delta)
+	track(button.InputBegan:Connect(function(input)
+		if isPress(input) then
+			holding = true
+			holdToken += 1
+			local myToken = holdToken
+			changeSpeed(delta)
+			task.spawn(function()
+				waitDelay(0.4)
+				while holding and holdToken == myToken and running do
+					changeSpeed(delta)
+					waitDelay(0.06)
+				end
+			end)
+		end
+	end))
+end
+
+hookStep(minusBtn, -10)
+hookStep(plusBtn, 10)
+
+track(UserInputService.InputEnded:Connect(function(input)
+	if isPress(input) then
+		holding = false
+	end
 end))
--- Visibility Slider
-local Sliding = false
-local function UpdateSlider(mouseX)
-local ratio = math.clamp((mouseX - SliderTrack.AbsolutePosition.X) / SliderTrack.AbsoluteSize.X, 0, 1)
-Config.BoxVisibility = ratio
-SliderFill.Size = UDim2.fromScale(ratio, 1)
-SliderKnob.Position = UDim2.new(ratio, 0, 0.5, 0)
-UpdateUI()
+
+-- slider: drag with mouse or finger
+local sliding = false
+
+local function setVisibilityFromX(x)
+	local ratio = math.clamp((x - sliderTrack.AbsolutePosition.X) / sliderTrack.AbsoluteSize.X, 0, 1)
+	CONFIG.BoxVisibility = ratio
+	sliderFill.Size = UDim2.fromScale(ratio, 1)
+	sliderKnob.Position = UDim2.new(ratio, 0, 0.5, 0)
+	refreshTexts()
 end
-TrackConnection(SliderTrack.InputBegan:Connect(function(input)
-if IsPrimaryInput(input) then Sliding = true; UpdateSlider(input.Position.X) end
+
+track(sliderTrack.InputBegan:Connect(function(input)
+	if isPress(input) then
+		sliding = true
+		setVisibilityFromX(input.Position.X)
+	end
 end))
-TrackConnection(UserInputService.InputChanged:Connect(function(input)
-if Sliding and IsMoveInput(input) then UpdateSlider(input.Position.X) end
+
+track(UserInputService.InputChanged:Connect(function(input)
+	if sliding and isMove(input) then
+		setVisibilityFromX(input.Position.X)
+	end
 end))
-TrackConnection(UserInputService.InputEnded:Connect(function(input)
-if Sliding and IsPrimaryInput(input) then Sliding = false end
+
+track(UserInputService.InputEnded:Connect(function(input)
+	if sliding and isPress(input) then
+		sliding = false
+	end
 end))
--- Keybind (K)
-TrackConnection(UserInputService.InputBegan:Connect(function(input, gameProcessed)
-if gameProcessed then return end
-if input.KeyCode == Config.ToggleKey then
-SetEnabled(not Enabled)
-end
+
+track(UserInputService.InputBegan:Connect(function(input, processed)
+	if processed then
+		return
+	end
+	if input.KeyCode == CONFIG.ToggleKey then
+		setEnabled(not enabled)
+	end
 end))
--- Tool & Player Lists
-local function GetAvailableTools()
-local list, seen = {}, {}
-local function scan(container)
-if not container then return end
-for _, item in ipairs(container:GetChildren()) do
-if item:IsA("Tool") and not seen[item.Name] then
-seen[item.Name] = true
-table.insert(list, item.Name)
+
+------------------------------------------------------------------
+-- Tool dropdown
+------------------------------------------------------------------
+local function collectToolNames()
+	local names, seen = {}, {}
+	local function scan(container)
+		if not container then
+			return
+		end
+		for _, item in ipairs(container:GetChildren()) do
+			if item:IsA("Tool") and not seen[item.Name] then
+				seen[item.Name] = true
+				table.insert(names, item.Name)
+			end
+		end
+	end
+	scan(player:FindFirstChildOfClass("Backpack"))
+	scan(player.Character)
+	-- keep picked names in the list even if the tool is gone for a moment (after dying)
+	for name in pairs(selected) do
+		if not seen[name] then
+			seen[name] = true
+			table.insert(names, name)
+		end
+	end
+	table.sort(names)
+	return names
 end
+
+local function rebuildDropList()
+	for _, child in ipairs(dropList:GetChildren()) do
+		if child:IsA("TextButton") or child:IsA("TextLabel") then
+			child:Destroy()
+		end
+	end
+
+	local names = collectToolNames()
+	if #names == 0 then
+		new("TextLabel", {
+			Size = UDim2.new(1, 0, 0, 26),
+			BackgroundTransparency = 1,
+			Text = "no tools found",
+			TextColor3 = THEME.SubText,
+			Font = Enum.Font.Gotham,
+			TextSize = 12,
+			ZIndex = 11,
+		}, dropList)
+		return
+	end
+
+	for i, name in ipairs(names) do
+		local row = new("TextButton", {
+			Size = UDim2.new(1, -6, 0, 26),
+			BackgroundColor3 = selected[name] and THEME.Edge or THEME.Button,
+			BorderSizePixel = 0,
+			Text = (selected[name] and "[x]  " or "[  ]  ") .. name,
+			TextColor3 = THEME.Text,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Font = Enum.Font.Gotham,
+			TextSize = 12,
+			LayoutOrder = i,
+			ZIndex = 11,
+		}, dropList)
+		corner(row)
+		new("UIPadding", { PaddingLeft = UDim.new(0, 6) }, row)
+
+		row.MouseButton1Click:Connect(function()
+			if selected[name] then
+				selected[name] = nil
+			else
+				selected[name] = true
+			end
+			row.BackgroundColor3 = selected[name] and THEME.Edge or THEME.Button
+			row.Text = (selected[name] and "[x]  " or "[  ]  ") .. name
+			refreshTexts()
+		end)
+	end
 end
-end
-scan(LocalPlayer:FindFirstChildOfClass("Backpack"))
-scan(LocalPlayer.Character)
-for name in pairs(SelectedTools) do
-if not seen[name] then
-seen[name] = true
-table.insert(list, name)
-end
-end
-table.sort(list)
-return list
-end
-local function PopulateToolsList()
-for _, child in ipairs(ToolsListFrame:GetChildren()) do
-if child:IsA("TextButton") or child:IsA("TextLabel") then child:Destroy() end
-end
-local tools = GetAvailableTools()
-if #tools == 0 then
-Create("TextLabel", {
-Size = UDim2.new(1, 0, 0, 26),
-BackgroundTransparency = 1,
-Text = "no tools found",
-TextColor3 = Theme.SubText,
-Font = Enum.Font.Gotham,
-TextSize = 12,
-ZIndex = 11
-}, ToolsListFrame)
-return
-end
-for i, toolName in ipairs(tools) do
-local btn = Create("TextButton", {
-Size = UDim2.new(1, -6, 0, 26),
-BackgroundColor3 = SelectedTools[toolName] and Theme.Edge or Theme.Button,
-BorderSizePixel = 0,
-Text = (SelectedTools[toolName] and "[x]  " or "[  ]  ") .. toolName,
-TextColor3 = Theme.Text,
-TextXAlignment = Enum.TextXAlignment.Left,
-Font = Enum.Font.Gotham,
-TextSize = 12,
-LayoutOrder = i,
-ZIndex = 11
-}, ToolsListFrame)
-AddCorner(btn)
-Create("UIPadding", { PaddingLeft = UDim.new(0, 6) }, btn)
-btn.MouseButton1Click:Connect(function()
-SelectedTools[toolName] = not SelectedTools[toolName] and true or nil
-btn.BackgroundColor3 = SelectedTools[toolName] and Theme.Edge or Theme.Button
-btn.Text = (SelectedTools[toolName] and "[x]  " or "[  ]  ") .. toolName
-UpdateUI()
-end)
-end
-end
-TrackConnection(ToolsDropdownBtn.MouseButton1Click:Connect(function()
-ProtectListFrame.Visible = false
-ToolsListFrame.Visible = not ToolsListFrame.Visible
-if ToolsListFrame.Visible then PopulateToolsList() end
-UpdateUI()
+
+track(dropBtn.MouseButton1Click:Connect(function()
+	protectList.Visible = false
+	dropList.Visible = not dropList.Visible
+	if dropList.Visible then
+		rebuildDropList()
+	end
+	refreshTexts()
 end))
-local function PopulateProtectList()
-for _, child in ipairs(ProtectListFrame:GetChildren()) do
-if child:IsA("TextButton") or child:IsA("TextLabel") then child:Destroy() end
+
+------------------------------------------------------------------
+-- Protect list (whitelist)
+------------------------------------------------------------------
+local function rebuildProtectList()
+	for _, child in ipairs(protectList:GetChildren()) do
+		if child:IsA("TextButton") or child:IsA("TextLabel") then
+			child:Destroy()
+		end
+	end
+
+	local entries, seen = {}, {}
+	for _, other in ipairs(Players:GetPlayers()) do
+		if other ~= player then
+			seen[other.Name] = true
+			local label = other.Name
+			if other.DisplayName ~= other.Name then
+				label = other.DisplayName .. " (@" .. other.Name .. ")"
+			end
+			table.insert(entries, { name = other.Name, label = label })
+		end
+	end
+	-- protected players who left stay in the list so they are still safe if they come back
+	for name in pairs(protected) do
+		if not seen[name] then
+			table.insert(entries, { name = name, label = name .. " (left)" })
+		end
+	end
+	table.sort(entries, function(a, b)
+		return a.name:lower() < b.name:lower()
+	end)
+
+	if #entries == 0 then
+		new("TextLabel", {
+			Size = UDim2.new(1, 0, 0, 26),
+			BackgroundTransparency = 1,
+			Text = "no other players",
+			TextColor3 = THEME.SubText,
+			Font = Enum.Font.Gotham,
+			TextSize = 12,
+			ZIndex = 11,
+		}, protectList)
+		return
+	end
+
+	for i, entry in ipairs(entries) do
+		local row = new("TextButton", {
+			Size = UDim2.new(1, -6, 0, 26),
+			BackgroundColor3 = protected[entry.name] and THEME.Edge or THEME.Button,
+			BorderSizePixel = 0,
+			Text = (protected[entry.name] and "[x]  " or "[  ]  ") .. entry.label,
+			TextColor3 = THEME.Text,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			Font = Enum.Font.Gotham,
+			TextSize = 12,
+			LayoutOrder = i,
+			ZIndex = 11,
+		}, protectList)
+		corner(row)
+		new("UIPadding", { PaddingLeft = UDim.new(0, 6) }, row)
+
+		row.MouseButton1Click:Connect(function()
+			if protected[entry.name] then
+				protected[entry.name] = nil
+			else
+				protected[entry.name] = true
+			end
+			row.BackgroundColor3 = protected[entry.name] and THEME.Edge or THEME.Button
+			row.Text = (protected[entry.name] and "[x]  " or "[  ]  ") .. entry.label
+			refreshTexts()
+		end)
+	end
 end
-local list, present = {}, {}
-for _, plr in ipairs(Players:GetPlayers()) do
-if plr ~= LocalPlayer then
-present[plr.Name] = true
-local label = plr.Name
-if plr.DisplayName ~= plr.Name then
-label = plr.DisplayName .. " (@" .. plr.Name .. ")"
-end
-table.insert(list, { name = plr.Name, label = label })
-end
-end
-for name in pairs(ProtectedPlayers) do
-if not present[name] then
-table.insert(list, { name = name, label = name .. " (left)" })
-end
-end
-table.sort(list, function(a, b) return a.name:lower() < b.name:lower() end)
-if #list == 0 then
-Create("TextLabel", {
-Size = UDim2.new(1, 0, 0, 26),
-BackgroundTransparency = 1,
-Text = "no other players",
-TextColor3 = Theme.SubText,
-Font = Enum.Font.Gotham,
-TextSize = 12,
-ZIndex = 11
-}, ProtectListFrame)
-return
-end
-for i, entry in ipairs(list) do
-local btn = Create("TextButton", {
-Size = UDim2.new(1, -6, 0, 26),
-BackgroundColor3 = ProtectedPlayers[entry.name] and Theme.Edge or Theme.Button,
-BorderSizePixel = 0,
-Text = (ProtectedPlayers[entry.name] and "[x]  " or "[  ]  ") .. entry.label,
-TextColor3 = Theme.Text,
-TextXAlignment = Enum.TextXAlignment.Left,
-TextTruncate = Enum.TextTruncate.AtEnd,
-Font = Enum.Font.Gotham,
-TextSize = 12,
-LayoutOrder = i,
-ZIndex = 11
-}, ProtectListFrame)
-AddCorner(btn)
-Create("UIPadding", { PaddingLeft = UDim.new(0, 6) }, btn)
-btn.MouseButton1Click:Connect(function()
-ProtectedPlayers[entry.name] = not ProtectedPlayers[entry.name] and true or nil
-btn.BackgroundColor3 = ProtectedPlayers[entry.name] and Theme.Edge or Theme.Button
-btn.Text = (ProtectedPlayers[entry.name] and "[x]  " or "[  ]  ") .. entry.label
-UpdateUI()
-end)
-end
-end
-TrackConnection(ProtectDropdownBtn.MouseButton1Click:Connect(function()
-ToolsListFrame.Visible = false
-ProtectListFrame.Visible = not ProtectListFrame.Visible
-if ProtectListFrame.Visible then PopulateProtectList() end
-UpdateUI()
+
+track(protectBtn.MouseButton1Click:Connect(function()
+	dropList.Visible = false
+	protectList.Visible = not protectList.Visible
+	if protectList.Visible then
+		rebuildProtectList()
+	end
+	refreshTexts()
 end))
-TrackConnection(RefreshBtn.MouseButton1Click:Connect(function()
-PopulateProtectList()
-RefreshBtn.Text = "Done"
-task.spawn(function()
-WaitSeconds(0.7)
-RefreshBtn.Text = "Refresh"
-end)
+
+-- Refresh button: re-scan the players in the server
+track(refreshBtn.MouseButton1Click:Connect(function()
+	rebuildProtectList()
+	refreshBtn.Text = "Done"
+	task.spawn(function()
+		waitDelay(0.7)
+		refreshBtn.Text = "Refresh"
+	end)
 end))
-TrackConnection(Players.PlayerAdded:Connect(function()
-if ProtectListFrame.Visible then PopulateProtectList() end
+
+-- the open list also updates by itself when someone joins or leaves
+track(Players.PlayerAdded:Connect(function()
+	if protectList.Visible then
+		rebuildProtectList()
+	end
 end))
-TrackConnection(Players.PlayerRemoving:Connect(function()
-if ProtectListFrame.Visible then task.defer(PopulateProtectList) end
+track(Players.PlayerRemoving:Connect(function()
+	if protectList.Visible then
+		task.defer(rebuildProtectList)
+	end
 end))
--- Visual Hitbox Indicator
-local MinBoxSize = 0.05
-local function GetBoxVector()
-local size = math.max(Config.BoxSize, MinBoxSize)
-return Vector3.new(size, size, size)
+
+------------------------------------------------------------------
+-- Aura box
+------------------------------------------------------------------
+-- a Part cannot be exactly 0 studs, so the visible box never goes below this
+local MIN_PART_SIZE = 0.05
+local function partSize()
+	local s = math.max(CONFIG.BoxSize, MIN_PART_SIZE)
+	return Vector3.new(s, s, s)
 end
-local AuraBox = Create("Part", {
-Name = "AzanAuraBox",
-Anchored = true,
-CanCollide = false,
-CanQuery = false,
-CanTouch = false,
-Massless = true,
-CastShadow = false,
-Material = Enum.Material.Neon,
-Color = Color3.fromRGB(190, 30, 35),
-Transparency = 1 - Config.BoxVisibility * 0.3,
-Size = GetBoxVector()
+
+local boxPart = new("Part", {
+	Name = "AzanAuraBox",
+	Anchored = true,
+	CanCollide = false,
+	CanQuery = false,
+	CanTouch = false,
+	Massless = true,
+	CastShadow = false,
+	Material = Enum.Material.Neon,
+	Color = Color3.fromRGB(190, 30, 35),
+	Transparency = 1 - CONFIG.BoxVisibility * 0.3,
+	Size = partSize(),
 }, nil)
-local SelectionBox = Create("SelectionBox", {
-Adornee = AuraBox,
-Color3 = Color3.fromRGB(220, 40, 45),
-LineThickness = 0.06,
-SurfaceTransparency = 1
-}, AuraBox)
-AuraBox.Parent = Workspace
-TrackConnection(BoxSizeInput.FocusLost:Connect(function()
-local num = tonumber(BoxSizeInput.Text)
-if num and num >= 0 then
-Config.BoxSize = math.clamp(num, 0, Config.MaxBoxSize)
-end
-BoxSizeInput.Text = tostring(Config.BoxSize)
+
+local boxOutline = new("SelectionBox", {
+	Adornee = boxPart,
+	Color3 = Color3.fromRGB(220, 40, 45),
+	LineThickness = 0.06,
+	SurfaceTransparency = 1,
+}, boxPart)
+
+boxPart.Parent = Workspace
+
+-- box size can be typed from 0 up to CONFIG.MaxBoxSize
+track(sizeBox.FocusLost:Connect(function()
+	local n = tonumber(sizeBox.Text)
+	if n and n >= 0 then
+		CONFIG.BoxSize = math.clamp(n, 0, CONFIG.MaxBoxSize)
+	end
+	sizeBox.Text = tostring(CONFIG.BoxSize)
 end))
--- Combat / Aura Helpers
-local function GetRoot(char)
-return char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
+
+local function getRoot(char)
+	return char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
 end
-local function IsAlive(char)
-local hum = char and char:FindFirstChildOfClass("Humanoid")
-return hum ~= nil and hum.Health > 0
+
+local function isAlive(char)
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	return hum ~= nil and hum.Health > 0
 end
-TrackConnection(RunService.Heartbeat:Connect(function()
-local root = GetRoot(LocalPlayer.Character)
-if Enabled and root and Config.BoxVisibility > 0 and IsAlive(LocalPlayer.Character) then
-AuraBox.Size = GetBoxVector()
-AuraBox.CFrame = CFrame.new(root.Position)
-if AuraBox.Parent ~= Workspace then AuraBox.Parent = Workspace end
-AuraBox.Transparency = 1 - Config.BoxVisibility * 0.3
-SelectionBox.Transparency = 1 - Config.BoxVisibility
-SelectionBox.Visible = true
-else
-AuraBox.CFrame = CFrame.new(0, -5000, 0)
-SelectionBox.Visible = false
-end
+
+-- the box follows you every frame, and comes back by itself after you respawn
+track(RunService.Heartbeat:Connect(function()
+	local root = getRoot(player.Character)
+	if enabled and root and CONFIG.BoxVisibility > 0 and isAlive(player.Character) then
+		boxPart.Size = partSize()
+		boxPart.CFrame = CFrame.new(root.Position)
+		if boxPart.Parent ~= Workspace then
+			boxPart.Parent = Workspace
+		end
+		boxPart.Transparency = 1 - CONFIG.BoxVisibility * 0.3
+		boxOutline.Transparency = 1 - CONFIG.BoxVisibility
+		boxOutline.Visible = true
+	else
+		-- park it far away so it is not seen while dead / hidden
+		boxPart.CFrame = CFrame.new(0, -5000, 0)
+		boxOutline.Visible = false
+	end
 end))
-local function IsInBox(origin, targetPos)
-local half = Config.BoxSize / 2
-local diff = targetPos - origin
-return math.abs(diff.X) <= half and math.abs(diff.Y) <= half and math.abs(diff.Z) <= half
+
+------------------------------------------------------------------
+-- Kill aura logic
+------------------------------------------------------------------
+local function insideBox(rootPos, otherPos)
+	local half = CONFIG.BoxSize / 2
+	local d = otherPos - rootPos
+	return math.abs(d.X) <= half and math.abs(d.Y) <= half and math.abs(d.Z) <= half
 end
-local function GetTargetsInRange(root)
-local targets = {}
-for _, plr in ipairs(Players:GetPlayers()) do
-if plr ~= LocalPlayer and plr.Character and IsAlive(plr.Character) then
-local targetRoot = GetRoot(plr.Character)
-if not ProtectedPlayers[plr.Name] and targetRoot and IsInBox(root.Position, targetRoot.Position) then
-table.insert(targets, plr.Character)
+
+-- every player inside the box (except you and the protected ones)
+local function getTargets(root)
+	local list = {}
+	for _, other in ipairs(Players:GetPlayers()) do
+		if other ~= player and other.Character and isAlive(other.Character) then
+			local otherRoot = getRoot(other.Character)
+			if not protected[other.Name] and otherRoot and insideBox(root.Position, otherRoot.Position) then
+				table.insert(list, other.Character)
+			end
+		end
+	end
+	return list
 end
+
+local function findTool(char, name)
+	local tool = char:FindFirstChild(name)
+	if tool and tool:IsA("Tool") then
+		return tool
+	end
+	local backpack = player:FindFirstChildOfClass("Backpack")
+	tool = backpack and backpack:FindFirstChild(name)
+	if tool and tool:IsA("Tool") then
+		return tool
+	end
+	return nil
 end
+
+-- Hits EVERYONE in the box with one tool in the same frame.
+-- The tool is activated ONCE (activating it again for every player runs into the
+-- tool's own cooldown, so only the first player got hit), then the touch is fired
+-- on every target right after, so all of them are hit together.
+local function swingAll(tool, targets)
+	pcall(function()
+		tool:Activate()
+	end)
+
+	-- for tools that deal damage by touching: use every part of the tool, not only "Handle"
+	if firetouchinterest then
+		local toolParts = {}
+		for _, d in ipairs(tool:GetDescendants()) do
+			if d:IsA("BasePart") then
+				table.insert(toolParts, d)
+			end
+		end
+		for _, targetChar in ipairs(targets) do
+			local bodyParts = {
+				getRoot(targetChar),
+				targetChar:FindFirstChild("Head"),
+			}
+			for _, toolPart in ipairs(toolParts) do
+				for _, bodyPart in pairs(bodyParts) do
+					pcall(function()
+						firetouchinterest(toolPart, bodyPart, 0)
+						firetouchinterest(toolPart, bodyPart, 1)
+					end)
+				end
+			end
+		end
+	end
 end
-return targets
+
+-- Equips every tool in the list and keeps them all in your hand. No waiting in here.
+-- hum:EquipTool is the real equip the server sees, but it kicks out the tool you are
+-- holding. So: EquipTool the first tool that is not in your hand, then put the rest
+-- back into the character by parenting them, so none of them swap out.
+local function equipTools(char, hum, toolList)
+	local first
+	for _, tool in ipairs(toolList) do
+		if tool.Parent ~= char then
+			first = tool
+			break
+		end
+	end
+	if not first then
+		return
+	end
+
+	pcall(function()
+		hum:EquipTool(first)
+	end)
+
+	for _, tool in ipairs(toolList) do
+		if tool.Parent ~= char then
+			pcall(function()
+				tool.Parent = char
+			end)
+		end
+	end
 end
-local function FindTool(char, name)
-local tool = char:FindFirstChild(name)
-if tool and tool:IsA("Tool") then return tool end
-local backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
-tool = backpack and backpack:FindFirstChild(name)
-if tool and tool:IsA("Tool") then return tool end
-return nil
+
+-- builds the list of tools to use right now
+local function buildToolList(char)
+	local toolList = {}
+	if CONFIG.EquipAll then
+		-- put every tool from your backpack in your hand at once, then use them all
+		local backpack = player:FindFirstChildOfClass("Backpack")
+		if backpack then
+			for _, item in ipairs(backpack:GetChildren()) do
+				if item:IsA("Tool") then
+					pcall(function()
+						item.Parent = char
+					end)
+				end
+			end
+		end
+		for _, item in ipairs(char:GetChildren()) do
+			if item:IsA("Tool") then
+				table.insert(toolList, item)
+			end
+		end
+	elseif selectedCount() > 0 then
+		for name in pairs(selected) do
+			local tool = findTool(char, name)
+			if tool then
+				table.insert(toolList, tool)
+			end
+		end
+	else
+		local held = char:FindFirstChildOfClass("Tool")
+		if held then
+			table.insert(toolList, held)
+		end
+	end
+	return toolList
 end
-local function AttackWithTool(tool, targets)
-pcall(function() tool:Activate() end)
-if firetouchinterest then
-local handles = {}
-for _, desc in ipairs(tool:GetDescendants()) do
-if desc:IsA("BasePart") then table.insert(handles, desc) end
-end
-for _, targetChar in ipairs(targets) do
--- Note: Bug in original script references undefined 'targetChar' instead of loop variable
-local hitParts = { getRoot(targetChar), targetChar:FindFirstChild("Head") }
-for _, handle in ipairs(handles) do
-for _, part in pairs(hitParts) do
-pcall(function()
-firetouchinterest(handle, part, 0)
-firetouchinterest(handle, part, 1)
-end)
-end
-end
-end
-end
-end
-local function EquipTools(char, hum, tools)
-local firstUnequipped = nil
-for _, tool in ipairs(tools) do
-if tool.Parent ~= char then
-firstUnequipped = tool
-break
-end
-end
-if not firstUnequipped then return end
-pcall(function() hum:EquipTool(firstUnequipped) end)
-for _, tool in ipairs(tools) do
-if tool.Parent ~= char then
-pcall(function() tool.Parent = char end)
-end
-end
-end
-local function GatherToolsToUse(char)
-local tools = {}
-if Config.EquipAll then
-local backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
-if backpack then
-for _, item in ipairs(backpack:GetChildren()) do
-if item:IsA("Tool") then pcall(function() item.Parent = char end) end
-end
-end
-for _, item in ipairs(char:GetChildren()) do
-if item:IsA("Tool") then table.insert(tools, item) end
-end
-elseif CountSelectedTools() > 0 then
-for name in pairs(SelectedTools) do
-local tool = FindTool(char, name)
-if tool then table.insert(tools, tool) end
-end
-else
-local equipped = char:FindFirstChildOfClass("Tool")
-if equipped then table.insert(tools, equipped) end
-end
-return tools
-end
--- Main Combat Loop
+
 task.spawn(function()
-while Running do
-if Enabled then
-local char = LocalPlayer.Character
-local root = GetRoot(char)
-local hum = char and char:FindFirstChildOfClass("Humanoid")
-if char and root and hum and hum.Health > 0 then
-local targets = GetTargetsInRange(root)
-StatusLabel.Text = "in box: " .. #targets
-if #targets > 0 then
-local tools = GatherToolsToUse(char)
-StatusLabel.Text = "in box: " .. #targets .. "  |  tools: " .. #tools
-EquipTools(char, hum, tools)
-for _, tool in ipairs(tools) do
-AttackWithTool(tool, targets)
-end
-end
-end
-end
-if not Enabled then
-StatusLabel.Text = "aura off"
-elseif not (LocalPlayer.Character and GetRoot(LocalPlayer.Character)) then
-StatusLabel.Text = "waiting for your character"
-end
-local delayTime = GetLoopDelay()
-if delayTime > 0 then
-WaitSeconds(delayTime)
-else
-RunService.Heartbeat:Wait()
-end
-end
+	while running do
+		if enabled then
+			local char = player.Character
+			local root = getRoot(char)
+			local hum = char and char:FindFirstChildOfClass("Humanoid")
+
+			if char and root and hum and hum.Health > 0 then
+				local targets = getTargets(root)
+				statusLabel.Text = "in box: " .. #targets
+
+				-- tools are only equipped and used while someone is inside the box
+				if #targets > 0 then
+					local toolList = buildToolList(char)
+					statusLabel.Text = "in box: " .. #targets .. "  |  tools: " .. #toolList
+
+					-- step 1: equip the picked tools, no delay
+					equipTools(char, hum, toolList)
+
+					-- step 2: every tool hits every player in the box right away, no delay
+					for _, tool in ipairs(toolList) do
+						swingAll(tool, targets)
+					end
+				end
+			end
+		end
+
+		-- Speed 100 = no delay at all (just one frame so the game does not freeze).
+		-- Lower speed = longer wait between hits (Speed 0 waits SLOWEST_DELAY seconds).
+		if not enabled then
+			statusLabel.Text = "aura off"
+		elseif not (player.Character and getRoot(player.Character)) then
+			statusLabel.Text = "waiting for your character"
+		end
+		local delay = getDelay()
+		if delay > 0 then
+			waitDelay(delay)
+		else
+			RunService.Heartbeat:Wait()
+		end
+	end
 end)
--- Cleanup Routine
-SharedEnv.__AzanKillAuraCleanup = function()
-Running = false
-Enabled = false
-for _, conn in ipairs(Connections) do
-pcall(function() conn:Disconnect() end)
+
+------------------------------------------------------------------
+-- Cleanup for re-execution
+------------------------------------------------------------------
+env.__AzanKillAuraCleanup = function()
+	running = false
+	enabled = false
+	for _, c in ipairs(connections) do
+		pcall(function()
+			c:Disconnect()
+		end)
+	end
+	table.clear(connections)
+	pcall(function()
+		boxPart:Destroy()
+	end)
+	if gui then
+		gui:Destroy()
+	end
 end
-table.clear(Connections)
-pcall(function() AuraBox:Destroy() end)
-if ScreenGui then ScreenGui:Destroy() end
-end
-UpdateUI()
+
+refreshTexts()
